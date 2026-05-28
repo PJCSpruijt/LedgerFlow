@@ -28,7 +28,13 @@ export interface AuthTokens {
 }
 
 export interface AuthResult extends AuthTokens {
-  user: { id: string; email: string; firstName: string; lastName: string };
+  user: {
+    id: string;
+    email: string;
+    firstName: string;
+    lastName: string;
+    platformRole: PlatformRole;
+  };
 }
 
 /** Hash a raw refresh token for safe DB storage. */
@@ -125,7 +131,13 @@ export async function register(input: RegisterInput): Promise<AuthResult> {
   const tokens = await issueTokens(user.id, user.email, user.platformRole);
 
   return {
-    user: { id: user.id, email: user.email, firstName: user.firstName, lastName: user.lastName },
+    user: {
+      id: user.id,
+      email: user.email,
+      firstName: user.firstName,
+      lastName: user.lastName,
+      platformRole: user.platformRole,
+    },
     ...tokens,
   };
 }
@@ -140,7 +152,13 @@ export async function login(input: LoginInput): Promise<AuthResult> {
   const tokens = await issueTokens(user.id, user.email, user.platformRole);
 
   return {
-    user: { id: user.id, email: user.email, firstName: user.firstName, lastName: user.lastName },
+    user: {
+      id: user.id,
+      email: user.email,
+      firstName: user.firstName,
+      lastName: user.lastName,
+      platformRole: user.platformRole,
+    },
     ...tokens,
   };
 }

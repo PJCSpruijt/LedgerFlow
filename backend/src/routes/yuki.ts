@@ -59,8 +59,25 @@ yukiRouter.put(
       },
     });
 
+    // Best-effort: adopt the administration's name from Yuki so the entity shows
+    // a recognizable label instead of a placeholder. A Yuki hiccup must not fail
+    // the save, so any error here is swallowed.
+    let administrationName: string | null = null;
+    try {
+      const connector = await getConnectorForEntity(entityId);
+      if (connector instanceof YukiConnector) {
+        administrationName = await connector.getAdministrationName();
+        if (administrationName) {
+          await prisma.entity.update({ where: { id: entityId }, data: { name: administrationName } });
+        }
+      }
+    } catch {
+      /* name resolution is best-effort */
+    }
+
     res.json({
       connection: { id: conn.id, environment: conn.environment, updatedAt: conn.updatedAt },
+      administrationName,
     });
   }),
 );

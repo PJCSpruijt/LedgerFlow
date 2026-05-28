@@ -10,11 +10,18 @@ import { SettingsPage } from "./pages/SettingsPage";
 import { BillingPage } from "./pages/BillingPage";
 import { YukiPage } from "./pages/YukiPage";
 import { ExportsPage } from "./pages/ExportsPage";
+import { AdminPage } from "./pages/AdminPage";
 
 function RequireAuth({ children }: { children: ReactElement }) {
   const { user, loading } = useAuth();
   if (loading) return <FullScreenLoading />;
   if (!user) return <Navigate to="/login" replace />;
+  return children;
+}
+
+function RequirePlatformAdmin({ children }: { children: ReactElement }) {
+  const { user } = useAuth();
+  if (user?.platformRole !== "PLATFORM_ADMIN") return <Navigate to="/dashboard" replace />;
   return children;
 }
 
@@ -49,6 +56,14 @@ export function App() {
         <Route path="/billing/cancel" element={<BillingPage />} />
         <Route path="/yuki" element={<YukiPage />} />
         <Route path="/exports" element={<ExportsPage />} />
+        <Route
+          path="/admin"
+          element={
+            <RequirePlatformAdmin>
+              <AdminPage />
+            </RequirePlatformAdmin>
+          }
+        />
       </Route>
 
       <Route path="*" element={<Navigate to="/dashboard" replace />} />

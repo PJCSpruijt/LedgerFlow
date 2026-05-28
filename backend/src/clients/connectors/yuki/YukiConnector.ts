@@ -121,10 +121,15 @@ export class YukiConnector implements Connector {
         });
         const result = (env as any)?.AdministrationsResponse?.AdministrationsResult;
         const inner = parseEmbeddedXml(result);
-        const list = inner?.Administrations?.Administration as
+        // The SOAP client's parser has no isArray hint for "Administration", so a
+        // single administration arrives as an object, not a one-element array.
+        // Normalize before mapping.
+        const raw = inner?.Administrations?.Administration as
           | Array<{ ID?: string; Name?: string }>
+          | { ID?: string; Name?: string }
           | undefined;
-        if (list) {
+        const list = Array.isArray(raw) ? raw : raw ? [raw] : [];
+        if (list.length) {
           administrations = list.map((a) => ({ id: String(a.ID ?? ""), name: String(a.Name ?? "") }));
         }
       } catch {
@@ -142,6 +147,18 @@ export class YukiConnector implements Connector {
         message: err instanceof Error ? err.message : "Onbekende fout bij Yuki-verbinding",
       };
     }
+  }
+
+  /**
+   * Resolve the human-readable name of the configured administration via Yuki's
+   * Administrations endpoint, matched on administrationId. Returns null if Yuki
+   * doesn't expose the list on this key or the id isn't found.
+   */
+  async getAdministrationName(): Promise<string | null> {
+    const result = await this.testConnection();
+    if (!result.ok || !result.administrations) return null;
+    const match = result.administrations.find((a) => a.id === this.creds.administrationId);
+    return match?.name?.trim() || null;
   }
 
   /**

@@ -17,7 +17,7 @@ interface TestResult {
 }
 
 export function YukiPage() {
-  const { entity } = useScope();
+  const { entity, reload } = useScope();
   const [conn, setConn] = useState<ConnectionInfo | null>(null);
   const [form, setForm] = useState({
     accessKey: "",
@@ -52,11 +52,20 @@ export function YukiPage() {
     setErr(null);
     setSaving(true);
     try {
-      await api("/api/yuki/connection", { method: "PUT", body: form });
-      setMsg("Yuki-verbinding opgeslagen");
+      const saved = await api<{ administrationName: string | null }>("/api/yuki/connection", {
+        method: "PUT",
+        body: form,
+      });
+      setMsg(
+        saved.administrationName
+          ? `Yuki-verbinding opgeslagen — administratie: ${saved.administrationName}`
+          : "Yuki-verbinding opgeslagen",
+      );
       setForm({ ...form, accessKey: "" });
       const r = await api<{ connection: ConnectionInfo | null }>("/api/yuki/connection");
       setConn(r.connection);
+      // Refresh the scope tree so the entity's adopted Yuki name shows in the sidebar.
+      await reload();
     } catch (e) {
       setErr(e instanceof ApiError ? e.message : "Opslaan mislukt");
     } finally {

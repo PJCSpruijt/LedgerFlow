@@ -1,6 +1,8 @@
+import { useState } from "react";
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
-import { useScope } from "../contexts/ScopeContext";
+import { isAdminRole, useScope } from "../contexts/ScopeContext";
+import { api } from "../services/api";
 
 const navItems = [
   { to: "/dashboard", label: "Dashboard" },
@@ -10,11 +12,32 @@ const navItems = [
   { to: "/settings", label: "Instellingen" },
 ];
 
+const adminNavItem = { to: "/admin", label: "Beheer" };
+
 export function AppLayout() {
   const { user, logout } = useAuth();
-  const { workspaces, workspace, group, entity, selectWorkspace, selectGroup, selectEntity } =
+  const { workspaces, workspace, group, entity, selectWorkspace, selectGroup, selectEntity, reload } =
     useScope();
   const nav = useNavigate();
+  const [adding, setAdding] = useState(false);
+
+  const canAddEntity = isAdminRole(group?.role ?? workspace?.role);
+
+  const addAdministration = async () => {
+    if (!group || adding) return;
+    setAdding(true);
+    try {
+      const r = await api<{ entity: { id: string; name: string; groupId: string } }>(
+        "/api/workspaces/current/entities",
+        { method: "POST", body: { name: "Nieuwe administratie", groupId: group.id } },
+      );
+      await reload();
+      selectEntity(r.entity.id);
+      nav("/yuki");
+    } finally {
+      setAdding(false);
+    }
+  };
 
   return (
     <div className="min-h-screen flex bg-slate-50">
@@ -24,7 +47,7 @@ export function AppLayout() {
           <div className="text-xs text-slate-500">Finance workflows</div>
         </div>
         <nav className="flex-1 px-3 py-4 space-y-1">
-          {navItems.map((item) => (
+          {(user?.platformRole === "PLATFORM_ADMIN" ? [...navItems, adminNavItem] : navItems).map((item) => (
             <NavLink
               key={item.to}
               to={item.to}
@@ -88,6 +111,15 @@ export function AppLayout() {
                 ))}
               </select>
             </label>
+          )}
+          {group && canAddEntity && (
+            <button
+              className="lf-link text-xs px-1 disabled:opacity-50"
+              onClick={addAdministration}
+              disabled={adding}
+            >
+              {adding ? "Bezig…" : "+ Administratie toevoegen"}
+            </button>
           )}
           <div className="text-xs text-slate-500 px-1">{user?.email}</div>
           <button

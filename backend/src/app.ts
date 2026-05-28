@@ -16,6 +16,7 @@ import { workspaceRouter } from "./routes/workspaces.js";
 import { yukiRouter } from "./routes/yuki.js";
 import { exportRouter } from "./routes/export.js";
 import { billingRouter, stripeWebhookRouter } from "./routes/billing.js";
+import { adminRouter } from "./routes/admin.js";
 
 /**
  * Build the Express app. Exposed as a factory so tests can mount it without
@@ -68,6 +69,7 @@ export function createApp() {
   app.use("/api/yuki", yukiRouter);
   app.use("/api/export", exportRouter);
   app.use("/api/billing", billingRouter);
+  app.use("/api/admin", adminRouter);
 
   app.use(notFoundHandler);
   app.use(errorHandler);
