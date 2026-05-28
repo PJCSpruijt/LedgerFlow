@@ -1,0 +1,76 @@
+import express from "express";
+import cors from "cors";
+import helmet from "helmet";
+import cookieParser from "cookie-parser";
+import { pinoHttp } from "pino-http";
+import rateLimit from "express-rate-limit";
+import type { IncomingMessage, ServerResponse } from "node:http";
+
+import { env } from "./config/env.js";
+import { logger } from "./config/logger.js";
+import { errorHandler, notFoundHandler } from "./middleware/errorHandler.js";
+
+import { healthRouter } from "./routes/health.js";
+import { authRouter } from "./routes/auth.js";
+import { organizationRouter } from "./routes/organizations.js";
+import { yukiRouter } from "./routes/yuki.js";
+import { exportRouter } from "./routes/export.js";
+import { billingRouter, stripeWebhookRouter } from "./routes/billing.js";
+
+/**
+ * Build the Express app. Exposed as a factory so tests can mount it without
+ * actually listening on a port.
+ */
+export function createApp() {
+  const app = express();
+
+  app.disable("x-powered-by");
+  app.set("trust proxy", 1);
+
+  // Stripe webhook MUST receive the raw body for signature verification —
+  // mount it BEFORE express.json().
+  app.use("/api/billing/webhook", stripeWebhookRouter);
+
+  app.use(helmet());
+  app.use(
+    cors({
+      origin: env.CORS_ORIGIN.split(",").map((s) => s.trim()),
+      credentials: true,
+    }),
+  );
+  app.use(express.json({ limit: "1mb" }));
+  app.use(cookieParser());
+  app.use(
+    pinoHttp({
+      logger,
+      customLogLevel: (_req: IncomingMessage, res: ServerResponse, err?: Error) => {
+        if (err || res.statusCode >= 500) return "error";
+        if (res.statusCode >= 400) return "warn";
+        return "info";
+      },
+    }),
+  );
+
+  // Global rate limit. Auth and billing routes apply stricter limits internally.
+  app.use(
+    rateLimit({
+      windowMs: 60_000,
+      limit: 300,
+      standardHeaders: "draft-7",
+      legacyHeaders: false,
+    }),
+  );
+
+  // Routes
+  app.use("/health", healthRouter);
+  app.use("/auth", authRouter);
+  app.use("/api/organizations", organizationRouter);
+  app.use("/api/yuki", yukiRouter);
+  app.use("/api/export", exportRouter);
+  app.use("/api/billing", billingRouter);
+
+  app.use(notFoundHandler);
+  app.use(errorHandler);
+
+  return app;
+}

@@ -1,0 +1,20 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html, body, #root { height: 100%; }
+  body { font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+}
+
+@layer components {
+  .lf-btn { @apply inline-flex items-center justify-center rounded-md font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed; }
+  .lf-btn-primary { @apply lf-btn bg-brand-600 text-white hover:bg-brand-700 px-4 py-2 text-sm; }
+  .lf-btn-secondary { @apply lf-btn bg-white text-slate-700 ring-1 ring-slate-300 hover:bg-slate-50 px-4 py-2 text-sm; }
+  .lf-btn-danger { @apply lf-btn bg-red-600 text-white hover:bg-red-700 px-4 py-2 text-sm; }
+  .lf-input { @apply w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500; }
+  .lf-label { @apply mb-1 block text-sm font-medium text-slate-700; }
+  .lf-card { @apply rounded-xl bg-white shadow-sm ring-1 ring-slate-200 p-6; }
+  .lf-pill { @apply inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium; }
+  .lf-link { @apply text-brand-600 hover:text-brand-700 hover:underline; }
+}

@@ -1,0 +1,69 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: ledgerflow-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ledgerflow
+      POSTGRES_PASSWORD: ledgerflow
+      POSTGRES_DB: ledgerflow
+    ports:
+      - "5432:5432"
+    volumes:
+      - ledgerflow_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ledgerflow"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      target: dev
+    container_name: ledgerflow-backend
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file:
+      - ./backend/.env
+    environment:
+      # Inside the compose network the DB host is "postgres", not localhost — override
+      # the value from .env so the same file still works for local-Node runs outside Docker.
+      DATABASE_URL: postgresql://ledgerflow:ledgerflow@postgres:5432/ledgerflow?schema=public
+      CORS_ORIGIN: http://localhost:5173
+      PORT: 4000
+      # tsx/chokidar can't see Windows-host file changes through the bind mount via inotify —
+      # force polling so the watcher actually fires on every save.
+      CHOKIDAR_USEPOLLING: "true"
+      CHOKIDAR_INTERVAL: "500"
+    ports:
+      - "4000:4000"
+    volumes:
+      - ./backend:/app
+      - /app/node_modules
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      target: dev
+    container_name: ledgerflow-frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    environment:
+      VITE_API_BASE_URL: http://localhost:4000
+      # Vite (running inside the container) proxies /auth and /api to this target.
+      # Use the compose service hostname, NOT localhost.
+      API_PROXY_TARGET: http://backend:4000
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+
+volumes:
+  ledgerflow_pgdata:

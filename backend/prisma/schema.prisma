@@ -1,0 +1,160 @@
+// LedgerFlow Prisma schema
+// Multi-tenant SaaS: Users belong to Organizations via OrganizationUser (role).
+// Subscriptions, accounting connections, and audit logs live at the Organization scope.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Platform-wide role, distinct from the per-scope membership roles. PLATFORM_ADMIN
+// is the superuser: bypasses subscription limits and has access to every
+// workspace/group/entity and all admin/test functionality.
+enum PlatformRole {
+  PLATFORM_ADMIN
+  USER
+}
+
+model User {
+  id            String       @id @default(uuid())
+  email         String       @unique
+  passwordHash  String
+  firstName     String
+  lastName      String
+  platformRole  PlatformRole @default(USER)
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  memberships   OrganizationUser[]
+  refreshTokens RefreshToken[]
+  auditLogs     AuditLog[]
+
+  @@index([email])
+}
+
+model Organization {
+  id          String   @id @default(uuid())
+  name        String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  members         OrganizationUser[]
+  subscription    Subscription?
+  yukiConnection  YukiConnection?
+  auditLogs       AuditLog[]
+}
+
+enum OrganizationRole {
+  OWNER
+  ADMIN
+  MEMBER
+  VIEWER
+}
+
+model OrganizationUser {
+  id             String           @id @default(uuid())
+  userId         String
+  organizationId String
+  role           OrganizationRole @default(MEMBER)
+  createdAt      DateTime         @default(now())
+
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, organizationId])
+  @@index([organizationId])
+}
+
+enum SubscriptionPlan {
+  STARTER
+  PROFESSIONAL
+  OFFICE
+}
+
+enum SubscriptionStatus {
+  TRIALING
+  ACTIVE
+  PAST_DUE
+  CANCELED
+  UNPAID
+  INCOMPLETE
+  INCOMPLETE_EXPIRED
+  PAUSED
+  NONE
+}
+
+model Subscription {
+  id                    String             @id @default(uuid())
+  organizationId        String             @unique
+  stripeCustomerId      String?
+  stripeSubscriptionId  String?            @unique
+  plan                  SubscriptionPlan?
+  status                SubscriptionStatus @default(NONE)
+  validUntil            DateTime?
+  createdAt             DateTime           @default(now())
+  updatedAt             DateTime           @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([stripeCustomerId])
+}
+
+enum YukiEnvironment {
+  PRODUCTION
+  SANDBOX
+}
+
+model YukiConnection {
+  id                   String          @id @default(uuid())
+  organizationId       String          @unique
+  // AES-256-GCM ciphertext of a JSON payload containing the Yuki credentials
+  // (e.g. { apiKey, administrationId }). NEVER returned to the frontend.
+  encryptedCredentials String
+  environment          YukiEnvironment @default(PRODUCTION)
+  lastTestedAt         DateTime?
+  lastSyncAt           DateTime?
+  createdAt            DateTime        @default(now())
+  updatedAt            DateTime        @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+}
+
+model AuditLog {
+  id             String   @id @default(uuid())
+  organizationId String
+  userId         String?
+  action         String
+  metadata       Json?
+  timestamp      DateTime @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user         User?        @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId, timestamp])
+  @@index([action])
+}
+
+model RefreshToken {
+  id        String   @id @default(uuid())
+  userId    String
+  tokenHash String   @unique
+  revokedAt DateTime?
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+// Records every Stripe event id we've already handled, so duplicate webhook
+// deliveries (Stripe retries / at-least-once delivery) become no-ops.
+model ProcessedStripeEvent {
+  eventId     String   @id
+  type        String
+  processedAt DateTime @default(now())
+}
