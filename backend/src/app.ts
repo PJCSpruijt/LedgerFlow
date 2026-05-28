@@ -12,7 +12,7 @@ import { errorHandler, notFoundHandler } from "./middleware/errorHandler.js";
 
 import { healthRouter } from "./routes/health.js";
 import { authRouter } from "./routes/auth.js";
-import { organizationRouter } from "./routes/organizations.js";
+import { workspaceRouter } from "./routes/workspaces.js";
 import { yukiRouter } from "./routes/yuki.js";
 import { exportRouter } from "./routes/export.js";
 import { billingRouter, stripeWebhookRouter } from "./routes/billing.js";
@@ -64,7 +64,7 @@ export function createApp() {
   // Routes
   app.use("/health", healthRouter);
   app.use("/auth", authRouter);
-  app.use("/api/organizations", organizationRouter);
+  app.use("/api/workspaces", workspaceRouter);
   app.use("/api/yuki", yukiRouter);
   app.use("/api/export", exportRouter);
   app.use("/api/billing", billingRouter);

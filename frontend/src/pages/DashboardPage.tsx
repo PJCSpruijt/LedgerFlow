@@ -1,5 +1,13 @@
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { useOrg } from "../contexts/OrganizationContext";
+import { useScope } from "../contexts/ScopeContext";
+import { api } from "../services/api";
+
+interface Subscription {
+  plan: string | null;
+  status: string;
+  validUntil: string | null;
+}
 
 function StatusPill({ status }: { status: string | undefined | null }) {
   const map: Record<string, string> = {
@@ -25,14 +33,47 @@ function StatusPill({ status }: { status: string | undefined | null }) {
 }
 
 export function DashboardPage() {
-  const { current } = useOrg();
+  const { workspace, entity } = useScope();
+  const [sub, setSub] = useState<Subscription | null>(null);
+  const [hasYuki, setHasYuki] = useState<boolean>(false);
+
+  useEffect(() => {
+    if (!workspace) return;
+    void (async () => {
+      try {
+        const r = await api<{ subscription: Subscription | null }>("/api/billing/subscription");
+        setSub(r.subscription);
+      } catch {
+        /* ignore */
+      }
+    })();
+  }, [workspace?.id]);
+
+  useEffect(() => {
+    if (!entity) {
+      setHasYuki(false);
+      return;
+    }
+    void (async () => {
+      try {
+        const r = await api<{ connection: unknown | null }>("/api/yuki/connection");
+        setHasYuki(r.connection != null);
+      } catch {
+        setHasYuki(false);
+      }
+    })();
+  }, [entity?.id]);
 
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-semibold text-slate-900">Dashboard</h1>
         <p className="text-sm text-slate-500 mt-1">
-          {current ? `Overzicht voor ${current.name}` : "Selecteer een organisatie"}
+          {entity
+            ? `Overzicht voor ${entity.name}`
+            : workspace
+              ? `Overzicht voor ${workspace.name}`
+              : "Selecteer een werkruimte"}
         </p>
       </div>
 
@@ -40,7 +81,7 @@ export function DashboardPage() {
         <div className="lf-card">
           <div className="text-xs uppercase tracking-wide text-slate-500">Yuki-koppeling</div>
           <div className="mt-2 text-lg font-semibold">
-            {current?.hasYukiConnection ? "Verbonden" : "Nog niet ingesteld"}
+            {!entity ? "Selecteer een administratie" : hasYuki ? "Verbonden" : "Nog niet ingesteld"}
           </div>
           <Link to="/yuki" className="lf-link text-sm mt-3 inline-block">
             Naar instellingen →
@@ -50,14 +91,12 @@ export function DashboardPage() {
         <div className="lf-card">
           <div className="text-xs uppercase tracking-wide text-slate-500">Abonnement</div>
           <div className="mt-2 flex items-center gap-2">
-            <StatusPill status={current?.subscription?.status} />
-            {current?.subscription?.plan && (
-              <span className="text-sm text-slate-500">{current.subscription.plan}</span>
-            )}
+            <StatusPill status={sub?.status} />
+            {sub?.plan && <span className="text-sm text-slate-500">{sub.plan}</span>}
           </div>
-          {current?.subscription?.validUntil && (
+          {sub?.validUntil && (
             <div className="text-xs text-slate-500 mt-2">
-              Geldig tot {new Date(current.subscription.validUntil).toLocaleDateString("nl-NL")}
+              Geldig tot {new Date(sub.validUntil).toLocaleDateString("nl-NL")}
             </div>
           )}
           <Link to="/billing" className="lf-link text-sm mt-3 inline-block">

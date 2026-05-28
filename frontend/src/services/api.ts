@@ -1,12 +1,14 @@
 /**
  * Thin fetch wrapper:
  *  - Adds Authorization: Bearer <access token> if present
- *  - Adds x-organization-id when an org is selected
+ *  - Adds x-workspace-id / x-group-id / x-entity-id for the selected scope
  *  - Auto-refreshes on 401 once, using the httpOnly refresh cookie
  *  - Throws ApiError so the UI can render error.code / error.message uniformly
  */
 
-const ORG_KEY = "lf_active_organization";
+const WS_KEY = "lf_scope_workspace";
+const GRP_KEY = "lf_scope_group";
+const ENT_KEY = "lf_scope_entity";
 
 let inFlightRefresh: Promise<string | null> | null = null;
 
@@ -37,13 +39,37 @@ export const tokenStore = {
   },
 };
 
-export const orgStore = {
-  get current(): string | null {
-    return localStorage.getItem(ORG_KEY);
+function persist(key: string, value: string | null): void {
+  if (value) localStorage.setItem(key, value);
+  else localStorage.removeItem(key);
+}
+
+// The selected scope (workspace + optional group + optional entity). Persisted in
+// localStorage so a reload keeps the user on the same administration. The api()
+// wrapper sends these as x-workspace-id / x-group-id / x-entity-id headers.
+export const scopeStore = {
+  get workspaceId(): string | null {
+    return localStorage.getItem(WS_KEY);
   },
-  set current(value: string | null) {
-    if (value) localStorage.setItem(ORG_KEY, value);
-    else localStorage.removeItem(ORG_KEY);
+  set workspaceId(value: string | null) {
+    persist(WS_KEY, value);
+  },
+  get groupId(): string | null {
+    return localStorage.getItem(GRP_KEY);
+  },
+  set groupId(value: string | null) {
+    persist(GRP_KEY, value);
+  },
+  get entityId(): string | null {
+    return localStorage.getItem(ENT_KEY);
+  },
+  set entityId(value: string | null) {
+    persist(ENT_KEY, value);
+  },
+  clear(): void {
+    persist(WS_KEY, null);
+    persist(GRP_KEY, null);
+    persist(ENT_KEY, null);
   },
 };
 
@@ -79,8 +105,9 @@ export interface ApiOptions extends Omit<RequestInit, "body"> {
 async function doFetch(path: string, opts: ApiOptions, token: string | null): Promise<Response> {
   const headers = new Headers(opts.headers);
   if (!opts.skipAuth && token) headers.set("Authorization", `Bearer ${token}`);
-  const orgId = orgStore.current;
-  if (orgId) headers.set("x-organization-id", orgId);
+  if (scopeStore.workspaceId) headers.set("x-workspace-id", scopeStore.workspaceId);
+  if (scopeStore.groupId) headers.set("x-group-id", scopeStore.groupId);
+  if (scopeStore.entityId) headers.set("x-entity-id", scopeStore.entityId);
   if (opts.body !== undefined && !(opts.body instanceof FormData)) {
     headers.set("Content-Type", "application/json");
   }

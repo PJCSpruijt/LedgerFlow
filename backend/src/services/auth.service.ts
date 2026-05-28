@@ -1,7 +1,7 @@
 import bcrypt from "bcryptjs";
 import jwt, { type SignOptions } from "jsonwebtoken";
 import { createHash, randomBytes } from "node:crypto";
-import { PlatformRole } from "@prisma/client";
+import { PlatformRole, ScopedRole, ScopeLevel } from "@prisma/client";
 import { prisma } from "../config/prisma.js";
 import { env } from "../config/env.js";
 import { ConflictError, UnauthorizedError } from "../utils/errors.js";
@@ -13,7 +13,7 @@ export interface RegisterInput {
   password: string;
   firstName: string;
   lastName: string;
-  organizationName: string;
+  workspaceName: string;
 }
 
 export interface LoginInput {
@@ -78,8 +78,9 @@ export async function register(input: RegisterInput): Promise<AuthResult> {
 
   const passwordHash = await bcrypt.hash(input.password, BCRYPT_ROUNDS);
 
-  // Create user + their first organization + ownership in one transaction.
-  const { user, organization } = await prisma.$transaction(async (tx) => {
+  // Create user + their first workspace (with a default group + entity) +
+  // workspace-admin membership + subscription, all in one transaction.
+  const { user } = await prisma.$transaction(async (tx) => {
     const user = await tx.user.create({
       data: {
         email: input.email.toLowerCase(),
@@ -88,24 +89,37 @@ export async function register(input: RegisterInput): Promise<AuthResult> {
         lastName: input.lastName,
       },
     });
-    const organization = await tx.organization.create({
-      data: { name: input.organizationName },
+    const workspace = await tx.workspace.create({
+      data: {
+        name: input.workspaceName,
+        groups: {
+          create: {
+            name: input.workspaceName,
+            entities: { create: { name: input.workspaceName } },
+          },
+        },
+      },
     });
-    await tx.organizationUser.create({
-      data: { userId: user.id, organizationId: organization.id, role: "OWNER" },
+    await tx.membership.create({
+      data: {
+        userId: user.id,
+        scopeLevel: ScopeLevel.WORKSPACE,
+        role: ScopedRole.WORKSPACE_ADMIN,
+        workspaceId: workspace.id,
+      },
     });
     await tx.subscription.create({
-      data: { organizationId: organization.id, status: "NONE" },
+      data: { workspaceId: workspace.id, status: "NONE" },
     });
     await tx.auditLog.create({
       data: {
-        organizationId: organization.id,
+        workspaceId: workspace.id,
         userId: user.id,
         action: "user.registered",
         metadata: { email: user.email },
       },
     });
-    return { user, organization };
+    return { user };
   });
 
   const tokens = await issueTokens(user.id, user.email, user.platformRole);

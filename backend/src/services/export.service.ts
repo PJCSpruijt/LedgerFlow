@@ -16,7 +16,7 @@ import type {
  */
 
 export interface ExportContext {
-  organizationName: string;
+  entityName: string;
   generatedAt: Date;
   from: string;
   to: string;
@@ -212,7 +212,7 @@ function addMetadataSheet(
   const data: Array<[string, string | number | Date]> = [
     ["Product", "LedgerFlow"],
     ["Tabblad", meta.sheetTitle],
-    ["Organisatie", ctx.organizationName],
+    ["Administratie", ctx.entityName],
     ["Periode van", ctx.from],
     ["Periode tot", ctx.to],
     ["Aantal regels", meta.rowCount],

@@ -1,13 +1,13 @@
 import express, { Router } from "express";
 import { z } from "zod";
-import { SubscriptionPlan } from "@prisma/client";
+import { ScopedRole, SubscriptionPlan } from "@prisma/client";
 import { prisma } from "../config/prisma.js";
 import { env } from "../config/env.js";
 import { logger } from "../config/logger.js";
 import { stripe, STRIPE_PRICE_IDS, planFromPriceId } from "../config/stripe.js";
 import { asyncHandler } from "../middleware/asyncHandler.js";
 import { validateBody } from "../middleware/validate.js";
-import { requireAuth, requireOrganization, requireRole } from "../middleware/auth.js";
+import { requireAuth, requireScope, requireScopeRole } from "../middleware/auth.js";
 import { mapStripeStatus } from "../services/subscription.service.js";
 import { BadRequestError, NotFoundError } from "../utils/errors.js";
 
@@ -24,11 +24,11 @@ const CheckoutSchema = z.object({
 billingRouter.post(
   "/create-checkout-session",
   requireAuth,
-  requireOrganization,
-  requireRole("ADMIN"),
+  requireScope,
+  requireScopeRole(ScopedRole.WORKSPACE_ADMIN),
   validateBody(CheckoutSchema),
   asyncHandler(async (req, res) => {
-    const orgId = req.organization!.id;
+    const workspaceId = req.scope!.workspaceId;
     const plan = req.body.plan as SubscriptionPlan;
     const priceId = STRIPE_PRICE_IDS[plan];
     if (!priceId || priceId.endsWith("_placeholder")) {
@@ -37,7 +37,7 @@ billingRouter.post(
       );
     }
 
-    const sub = await prisma.subscription.findUnique({ where: { organizationId: orgId } });
+    const sub = await prisma.subscription.findUnique({ where: { workspaceId } });
     if (!sub) throw new NotFoundError("Subscription record missing");
 
     // Reuse the customer if we have one, otherwise let Stripe create it on checkout.
@@ -48,23 +48,23 @@ billingRouter.post(
       cancel_url: env.STRIPE_CANCEL_URL,
       customer: sub.stripeCustomerId ?? undefined,
       customer_email: sub.stripeCustomerId ? undefined : req.user!.email,
-      client_reference_id: orgId,
-      metadata: { organizationId: orgId, plan },
-      subscription_data: { metadata: { organizationId: orgId } },
+      client_reference_id: workspaceId,
+      metadata: { workspaceId, plan },
+      subscription_data: { metadata: { workspaceId } },
     });
 
     res.json({ url: session.url, sessionId: session.id });
   }),
 );
 
-/** Return the current subscription status for the active org. */
+/** Return the current subscription status for the active workspace. */
 billingRouter.get(
   "/subscription",
   requireAuth,
-  requireOrganization,
+  requireScope,
   asyncHandler(async (req, res) => {
     const sub = await prisma.subscription.findUnique({
-      where: { organizationId: req.organization!.id },
+      where: { workspaceId: req.scope!.workspaceId },
     });
     res.json({
       subscription: sub
@@ -134,22 +134,22 @@ async function handleStripeEvent(event: import("stripe").Stripe.Event): Promise<
   switch (event.type) {
     case "checkout.session.completed": {
       const session = event.data.object as import("stripe").Stripe.Checkout.Session;
-      const organizationId = session.metadata?.organizationId ?? session.client_reference_id;
-      if (!organizationId || !session.subscription) return;
+      const workspaceId = session.metadata?.workspaceId ?? session.client_reference_id;
+      if (!workspaceId || !session.subscription) return;
       const sub = await stripe.subscriptions.retrieve(session.subscription as string);
-      await upsertSubscription(organizationId, sub, session.customer as string | null);
+      await upsertSubscription(workspaceId, sub, session.customer as string | null);
       break;
     }
     case "customer.subscription.created":
     case "customer.subscription.updated":
     case "customer.subscription.deleted": {
       const sub = event.data.object as import("stripe").Stripe.Subscription;
-      const organizationId = sub.metadata?.organizationId;
-      if (!organizationId) {
-        logger.warn({ subId: sub.id }, "Subscription event without organizationId metadata");
+      const workspaceId = sub.metadata?.workspaceId;
+      if (!workspaceId) {
+        logger.warn({ subId: sub.id }, "Subscription event without workspaceId metadata");
         return;
       }
-      await upsertSubscription(organizationId, sub, sub.customer as string | null);
+      await upsertSubscription(workspaceId, sub, sub.customer as string | null);
       break;
     }
     default:
@@ -158,7 +158,7 @@ async function handleStripeEvent(event: import("stripe").Stripe.Event): Promise<
 }
 
 async function upsertSubscription(
-  organizationId: string,
+  workspaceId: string,
   sub: import("stripe").Stripe.Subscription,
   customerId: string | null,
 ): Promise<void> {
@@ -176,9 +176,9 @@ async function upsertSubscription(
   const validUntil = typeof cpeRaw === "number" ? new Date(cpeRaw * 1000) : null;
 
   await prisma.subscription.upsert({
-    where: { organizationId },
+    where: { workspaceId },
     create: {
-      organizationId,
+      workspaceId,
       stripeCustomerId: customerId,
       stripeSubscriptionId: sub.id,
       plan,
@@ -196,7 +196,7 @@ async function upsertSubscription(
 
   await prisma.auditLog.create({
     data: {
-      organizationId,
+      workspaceId,
       action: "subscription.updated",
       metadata: { status, plan, stripeSubscriptionId: sub.id },
     },

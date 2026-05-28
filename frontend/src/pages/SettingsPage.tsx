@@ -1,24 +1,28 @@
-import { useState } from "react";
-import { useOrg } from "../contexts/OrganizationContext";
+import { useEffect, useState } from "react";
+import { isAdminRole, useScope } from "../contexts/ScopeContext";
 import { api, ApiError } from "../services/api";
 
 export function SettingsPage() {
-  const { current, reload } = useOrg();
-  const [name, setName] = useState(current?.name ?? "");
+  const { workspace, role, reload } = useScope();
+  const [name, setName] = useState(workspace?.name ?? "");
   const [msg, setMsg] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
-  if (!current) return <div>Selecteer een organisatie.</div>;
+  useEffect(() => {
+    setName(workspace?.name ?? "");
+  }, [workspace?.id, workspace?.name]);
 
-  const canEdit = current.role === "OWNER" || current.role === "ADMIN";
+  if (!workspace) return <div>Selecteer een werkruimte.</div>;
+
+  const canEdit = isAdminRole(workspace.role);
 
   const save = async () => {
     setMsg(null);
     setErr(null);
     setSaving(true);
     try {
-      await api("/api/organizations/current", { method: "PATCH", body: { name } });
+      await api("/api/workspaces/current", { method: "PATCH", body: { name } });
       await reload();
       setMsg("Opgeslagen");
     } catch (e) {
@@ -32,11 +36,11 @@ export function SettingsPage() {
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-semibold">Instellingen</h1>
-        <p className="text-sm text-slate-500 mt-1">Organisatieprofiel en gebruikersrol.</p>
+        <p className="text-sm text-slate-500 mt-1">Werkruimteprofiel en gebruikersrol.</p>
       </div>
       <div className="lf-card max-w-xl space-y-4">
         <div>
-          <label className="lf-label">Naam organisatie</label>
+          <label className="lf-label">Naam werkruimte</label>
           <input
             className="lf-input"
             value={name}
@@ -46,7 +50,7 @@ export function SettingsPage() {
         </div>
         <div>
           <label className="lf-label">Jouw rol</label>
-          <div className="text-sm text-slate-700">{current.role}</div>
+          <div className="text-sm text-slate-700">{role}</div>
         </div>
         {msg && <div className="text-sm text-emerald-700">{msg}</div>}
         {err && <div className="text-sm text-red-600">{err}</div>}

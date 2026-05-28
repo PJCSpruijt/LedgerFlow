@@ -21,7 +21,7 @@ const RegisterSchema = z.object({
   password: z.string().min(10, "Password must be at least 10 characters"),
   firstName: z.string().min(1).max(80),
   lastName: z.string().min(1).max(80),
-  organizationName: z.string().min(1).max(120),
+  workspaceName: z.string().min(1).max(120),
 });
 
 const LoginSchema = z.object({

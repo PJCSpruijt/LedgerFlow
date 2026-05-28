@@ -6,16 +6,16 @@ import { isPlatformAdmin } from "./auth.js";
 
 /**
  * Gate premium endpoints (exports, syncs) behind an active subscription.
- * Must run AFTER requireOrganization so req.organization is set.
+ * Billing lives at the workspace, so this must run AFTER requireScope.
  *
  * The platform superuser bypasses this gate entirely; no normal user does.
  */
 export const requireActiveSubscription: RequestHandler = async (req, _res, next) => {
   try {
     if (isPlatformAdmin(req)) return next();
-    if (!req.organization) throw new SubscriptionRequiredError("No organization context");
+    if (!req.scope) throw new SubscriptionRequiredError("No workspace context");
     const sub = await prisma.subscription.findUnique({
-      where: { organizationId: req.organization.id },
+      where: { workspaceId: req.scope.workspaceId },
     });
     if (!isSubscriptionActive(sub)) {
       throw new SubscriptionRequiredError(

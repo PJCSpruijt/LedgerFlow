@@ -1,11 +1,12 @@
 import { describe, it, expect, vi } from "vitest";
 import jwt from "jsonwebtoken";
-import { PlatformRole } from "@prisma/client";
+import { PlatformRole, ScopedRole } from "@prisma/client";
 import { verifyAccessToken } from "../src/services/auth.service.js";
 import {
   isPlatformAdmin,
   requirePlatformAdmin,
-  requireRole,
+  requireScopeRole,
+  SCOPE_ADMIN_ROLES,
 } from "../src/middleware/auth.js";
 import { requireActiveSubscription } from "../src/middleware/subscription.js";
 import { ForbiddenError, SubscriptionRequiredError } from "../src/utils/errors.js";
@@ -63,10 +64,10 @@ describe("requirePlatformAdmin", () => {
   });
 });
 
-describe("requireRole — platform admin bypass", () => {
-  it("passes a platform admin even with no organization context", () => {
+describe("requireScopeRole — platform admin bypass + scoped roles", () => {
+  it("passes a platform admin even with no scope context", () => {
     const next = vi.fn();
-    requireRole("OWNER")(
+    requireScopeRole(...SCOPE_ADMIN_ROLES)(
       { user: { id: "1", email: "", platformRole: PlatformRole.PLATFORM_ADMIN } } as never,
       {} as never,
       next,
@@ -74,12 +75,25 @@ describe("requireRole — platform admin bypass", () => {
     expect(next).toHaveBeenCalledWith();
   });
 
-  it("rejects a normal user lacking the required role", () => {
+  it("passes a user whose scope roles include an allowed role", () => {
     const next = vi.fn();
-    requireRole("ADMIN")(
+    requireScopeRole(...SCOPE_ADMIN_ROLES)(
       {
         user: { id: "1", email: "", platformRole: PlatformRole.USER },
-        organization: { id: "o1", role: "VIEWER" },
+        scope: { workspaceId: "w1", scopeLevel: "WORKSPACE", role: ScopedRole.WORKSPACE_ADMIN, roles: [ScopedRole.WORKSPACE_ADMIN] },
+      } as never,
+      {} as never,
+      next,
+    );
+    expect(next).toHaveBeenCalledWith();
+  });
+
+  it("rejects a user lacking the required role", () => {
+    const next = vi.fn();
+    requireScopeRole(...SCOPE_ADMIN_ROLES)(
+      {
+        user: { id: "1", email: "", platformRole: PlatformRole.USER },
+        scope: { workspaceId: "w1", scopeLevel: "WORKSPACE", role: ScopedRole.READ_ONLY, roles: [ScopedRole.READ_ONLY] },
       } as never,
       {} as never,
       next,
@@ -99,7 +113,7 @@ describe("requireActiveSubscription — bypass scoping", () => {
     expect(next).toHaveBeenCalledWith();
   });
 
-  it("does NOT bypass for a normal user with no organization context", async () => {
+  it("does NOT bypass for a normal user with no scope context", async () => {
     const next = vi.fn();
     await requireActiveSubscription(
       { user: { id: "1", email: "", platformRole: PlatformRole.USER } } as never,

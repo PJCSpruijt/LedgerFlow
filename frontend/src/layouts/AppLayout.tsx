@@ -1,6 +1,6 @@
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
-import { useOrg } from "../contexts/OrganizationContext";
+import { useScope } from "../contexts/ScopeContext";
 
 const navItems = [
   { to: "/dashboard", label: "Dashboard" },
@@ -12,7 +12,8 @@ const navItems = [
 
 export function AppLayout() {
   const { user, logout } = useAuth();
-  const { organizations, current, setCurrent } = useOrg();
+  const { workspaces, workspace, group, entity, selectWorkspace, selectGroup, selectEntity } =
+    useScope();
   const nav = useNavigate();
 
   return (
@@ -40,18 +41,53 @@ export function AppLayout() {
           ))}
         </nav>
         <div className="px-3 py-4 border-t border-slate-200 space-y-2">
-          {organizations.length > 0 && (
-            <select
-              className="lf-input text-xs"
-              value={current?.id ?? ""}
-              onChange={(e) => setCurrent(e.target.value)}
-            >
-              {organizations.map((o) => (
-                <option key={o.id} value={o.id}>
-                  {o.name}
-                </option>
-              ))}
-            </select>
+          {workspaces.length > 0 && (
+            <label className="block">
+              <span className="text-[10px] uppercase tracking-wide text-slate-400">Werkruimte</span>
+              <select
+                className="lf-input text-xs"
+                value={workspace?.id ?? ""}
+                onChange={(e) => selectWorkspace(e.target.value)}
+              >
+                {workspaces.map((w) => (
+                  <option key={w.id} value={w.id}>
+                    {w.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+          {workspace && workspace.groups.length > 1 && (
+            <label className="block">
+              <span className="text-[10px] uppercase tracking-wide text-slate-400">Groep</span>
+              <select
+                className="lf-input text-xs"
+                value={group?.id ?? ""}
+                onChange={(e) => selectGroup(e.target.value)}
+              >
+                {workspace.groups.map((g) => (
+                  <option key={g.id} value={g.id}>
+                    {g.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+          {group && group.entities.length > 0 && (
+            <label className="block">
+              <span className="text-[10px] uppercase tracking-wide text-slate-400">Administratie</span>
+              <select
+                className="lf-input text-xs"
+                value={entity?.id ?? ""}
+                onChange={(e) => selectEntity(e.target.value)}
+              >
+                {group.entities.map((en) => (
+                  <option key={en.id} value={en.id}>
+                    {en.name}
+                  </option>
+                ))}
+              </select>
+            </label>
           )}
           <div className="text-xs text-slate-500 px-1">{user?.email}</div>
           <button

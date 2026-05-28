@@ -11,7 +11,7 @@ export function RegisterPage() {
     password: "",
     firstName: "",
     lastName: "",
-    organizationName: "",
+    workspaceName: "",
   });
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -62,12 +62,12 @@ export function RegisterPage() {
         />
       </div>
       <div>
-        <label className="lf-label">Bedrijfsnaam</label>
+        <label className="lf-label">Naam werkruimte (bedrijf of kantoor)</label>
         <input
           className="lf-input"
           required
-          value={form.organizationName}
-          onChange={set("organizationName")}
+          value={form.workspaceName}
+          onChange={set("workspaceName")}
         />
       </div>
       {error && <div className="text-sm text-red-600">{error}</div>}

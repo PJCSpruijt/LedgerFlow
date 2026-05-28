@@ -1,6 +1,7 @@
 // LedgerFlow Prisma schema
-// Multi-tenant SaaS: Users belong to Organizations via OrganizationUser (role).
-// Subscriptions, accounting connections, and audit logs live at the Organization scope.
+// Multi-tenant SaaS hierarchy: Workspace > Group > Entity.
+// Users get access via Membership rows scoped to exactly one of those levels.
+// Subscriptions live at the Workspace; connectors at the Entity; audit logs at the Workspace.
 
 generator client {
   provider = "prisma-client-js"
@@ -29,44 +30,108 @@ model User {
   createdAt     DateTime     @default(now())
   updatedAt     DateTime     @updatedAt
 
-  memberships   OrganizationUser[]
+  memberships   Membership[]
   refreshTokens RefreshToken[]
   auditLogs     AuditLog[]
 
   @@index([email])
 }
 
-model Organization {
+// A Workspace is the commercial tenant (billing lives here). COMPANY = a single
+// business managing its own books; ACCOUNTING_FIRM = a firm managing many clients.
+enum WorkspaceType {
+  COMPANY
+  ACCOUNTING_FIRM
+}
+
+model Workspace {
+  id        String        @id @default(uuid())
+  name      String
+  type      WorkspaceType @default(COMPANY)
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+
+  groups       Group[]
+  memberships  Membership[]
+  subscription Subscription?
+  auditLogs    AuditLog[]
+}
+
+// A Group is a consolidation group inside a workspace (e.g. a holding).
+model Group {
   id          String   @id @default(uuid())
+  workspaceId String
   name        String
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  members         OrganizationUser[]
-  subscription    Subscription?
-  yukiConnection  YukiConnection?
-  auditLogs       AuditLog[]
+  workspace   Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  entities    Entity[]
+  memberships Membership[]
+  auditLogs   AuditLog[]
+
+  @@index([workspaceId])
 }
 
-enum OrganizationRole {
-  OWNER
-  ADMIN
-  MEMBER
-  VIEWER
+// An Entity is a single administration / legal entity. Connectors attach here.
+model Entity {
+  id        String   @id @default(uuid())
+  groupId   String
+  name      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  group          Group           @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  yukiConnection YukiConnection?
+  memberships    Membership[]
+  auditLogs      AuditLog[]
+
+  @@index([groupId])
 }
 
-model OrganizationUser {
-  id             String           @id @default(uuid())
-  userId         String
-  organizationId String
-  role           OrganizationRole @default(MEMBER)
-  createdAt      DateTime         @default(now())
+// The scope level a Membership is attached to. Exactly one of the matching FK
+// columns is set (enforced by a CHECK constraint defined in raw SQL).
+enum ScopeLevel {
+  WORKSPACE
+  GROUP
+  ENTITY
+}
 
-  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
-  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+// Per-scope roles (replaces the old flat OrganizationRole). PLATFORM_ADMIN stays
+// platform-wide on User and bypasses all of these.
+enum ScopedRole {
+  WORKSPACE_ADMIN
+  ACCOUNTANT_ADMIN
+  ACCOUNTANT_USER
+  CLIENT_ADMIN
+  CLIENT_USER
+  READ_ONLY
+  MAPPING_MANAGER
+  CONSOLIDATION_MANAGER
+}
 
-  @@unique([userId, organizationId])
-  @@index([organizationId])
+// Polymorphic membership: one row grants a user a role at exactly one scope.
+// Effective access to an entity = a membership on that entity, its parent group,
+// or the workspace. Partial unique indexes + a CHECK constraint live in raw SQL.
+model Membership {
+  id          String     @id @default(uuid())
+  userId      String
+  scopeLevel  ScopeLevel
+  role        ScopedRole
+  workspaceId String?
+  groupId     String?
+  entityId    String?
+  createdAt   DateTime   @default(now())
+
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workspace Workspace? @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  group     Group?     @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  entity    Entity?    @relation(fields: [entityId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([workspaceId])
+  @@index([groupId])
+  @@index([entityId])
 }
 
 enum SubscriptionPlan {
@@ -89,7 +154,7 @@ enum SubscriptionStatus {
 
 model Subscription {
   id                    String             @id @default(uuid())
-  organizationId        String             @unique
+  workspaceId           String             @unique
   stripeCustomerId      String?
   stripeSubscriptionId  String?            @unique
   plan                  SubscriptionPlan?
@@ -98,7 +163,7 @@ model Subscription {
   createdAt             DateTime           @default(now())
   updatedAt             DateTime           @updatedAt
 
-  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
 
   @@index([stripeCustomerId])
 }
@@ -110,7 +175,7 @@ enum YukiEnvironment {
 
 model YukiConnection {
   id                   String          @id @default(uuid())
-  organizationId       String          @unique
+  entityId             String          @unique
   // AES-256-GCM ciphertext of a JSON payload containing the Yuki credentials
   // (e.g. { apiKey, administrationId }). NEVER returned to the frontend.
   encryptedCredentials String
@@ -120,21 +185,25 @@ model YukiConnection {
   createdAt            DateTime        @default(now())
   updatedAt            DateTime        @updatedAt
 
-  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  entity Entity @relation(fields: [entityId], references: [id], onDelete: Cascade)
 }
 
 model AuditLog {
-  id             String   @id @default(uuid())
-  organizationId String
-  userId         String?
-  action         String
-  metadata       Json?
-  timestamp      DateTime @default(now())
+  id          String   @id @default(uuid())
+  workspaceId String
+  groupId     String?
+  entityId    String?
+  userId      String?
+  action      String
+  metadata    Json?
+  timestamp   DateTime @default(now())
 
-  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  user         User?        @relation(fields: [userId], references: [id], onDelete: SetNull)
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  group     Group?    @relation(fields: [groupId], references: [id], onDelete: SetNull)
+  entity    Entity?   @relation(fields: [entityId], references: [id], onDelete: SetNull)
+  user      User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
 
-  @@index([organizationId, timestamp])
+  @@index([workspaceId, timestamp])
   @@index([action])
 }
 

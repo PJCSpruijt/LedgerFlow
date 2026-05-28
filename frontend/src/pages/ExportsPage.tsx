@@ -1,6 +1,6 @@
-import { useState } from "react";
-import { apiDownload, ApiError } from "../services/api";
-import { useOrg } from "../contexts/OrganizationContext";
+import { useEffect, useState } from "react";
+import { api, apiDownload, ApiError } from "../services/api";
+import { useScope } from "../contexts/ScopeContext";
 
 function defaultRange(): { from: string; to: string } {
   const now = new Date();
@@ -9,15 +9,29 @@ function defaultRange(): { from: string; to: string } {
 }
 
 export function ExportsPage() {
-  const { current } = useOrg();
+  const { workspace, entity } = useScope();
   const [range, setRange] = useState(defaultRange());
   const [busy, setBusy] = useState<"tb" | "tx" | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const [status, setStatus] = useState<string | null>(null);
 
-  if (!current) return <div>Selecteer een organisatie.</div>;
+  useEffect(() => {
+    if (!workspace) return;
+    void (async () => {
+      try {
+        const r = await api<{ subscription: { status: string } | null }>(
+          "/api/billing/subscription",
+        );
+        setStatus(r.subscription?.status ?? null);
+      } catch {
+        setStatus(null);
+      }
+    })();
+  }, [workspace?.id]);
 
-  const active =
-    current.subscription?.status === "ACTIVE" || current.subscription?.status === "TRIALING";
+  if (!entity) return <div className="lf-card max-w-2xl">Selecteer een administratie in de zijbalk.</div>;
+
+  const active = status === "ACTIVE" || status === "TRIALING";
 
   const download = async (kind: "tb" | "tx") => {
     setErr(null);

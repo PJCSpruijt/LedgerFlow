@@ -7,20 +7,20 @@ import { MockConnector } from "./mock/MockConnector.js";
 import { YukiConnector, type YukiCredentials } from "./yuki/YukiConnector.js";
 
 /**
- * Resolve the right connector for an organization.
+ * Resolve the right connector for an entity (a single administration).
  * - If CONNECTOR_MODE=mock → always MockConnector
- * - Else: load the encrypted YukiConnection row, decrypt, instantiate.
+ * - Else: load the encrypted YukiConnection row for the entity, decrypt, instantiate.
  * - If no connection is configured, throw NotFoundError. We deliberately do NOT
  *   fall back to mock data in yuki mode: silently serving fake figures as if
  *   they were real Yuki data would be dangerous for a finance product.
  */
-export async function getConnectorForOrganization(organizationId: string): Promise<Connector> {
+export async function getConnectorForEntity(entityId: string): Promise<Connector> {
   if (env.CONNECTOR_MODE === "mock") return new MockConnector();
 
-  const conn = await prisma.yukiConnection.findUnique({ where: { organizationId } });
+  const conn = await prisma.yukiConnection.findUnique({ where: { entityId } });
   if (!conn) {
     throw new NotFoundError(
-      "Geen Yuki-verbinding geconfigureerd voor deze organisatie. Configureer deze in Instellingen → Yuki.",
+      "Geen Yuki-verbinding geconfigureerd voor deze administratie. Configureer deze in Instellingen → Yuki.",
     );
   }
   const creds = decryptJson<YukiCredentials>(conn.encryptedCredentials);

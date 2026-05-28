@@ -1,11 +1,12 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
-import { api, tokenStore, orgStore } from "../services/api";
+import { api, tokenStore, scopeStore } from "../services/api";
 
 export interface AuthUser {
   id: string;
   email: string;
   firstName?: string;
   lastName?: string;
+  platformRole?: "USER" | "PLATFORM_ADMIN";
 }
 
 interface AuthContextValue {
@@ -21,7 +22,7 @@ interface RegisterInput {
   password: string;
   firstName: string;
   lastName: string;
-  organizationName: string;
+  workspaceName: string;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -84,7 +85,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       /* ignore */
     }
     tokenStore.accessToken = null;
-    orgStore.current = null;
+    scopeStore.clear();
     setUser(null);
   };
 

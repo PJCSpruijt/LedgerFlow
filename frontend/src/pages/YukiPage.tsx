@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { api, ApiError } from "../services/api";
-import { useOrg } from "../contexts/OrganizationContext";
+import { isAdminRole, useScope } from "../contexts/ScopeContext";
 
 interface ConnectionInfo {
   id: string;
@@ -17,7 +17,7 @@ interface TestResult {
 }
 
 export function YukiPage() {
-  const { current, reload } = useOrg();
+  const { entity } = useScope();
   const [conn, setConn] = useState<ConnectionInfo | null>(null);
   const [form, setForm] = useState({
     accessKey: "",
@@ -31,7 +31,10 @@ export function YukiPage() {
   const [testing, setTesting] = useState(false);
 
   useEffect(() => {
-    if (!current) return;
+    if (!entity) {
+      setConn(null);
+      return;
+    }
     void (async () => {
       try {
         const r = await api<{ connection: ConnectionInfo | null }>("/api/yuki/connection");
@@ -40,9 +43,9 @@ export function YukiPage() {
         /* ignore */
       }
     })();
-  }, [current]);
+  }, [entity?.id]);
 
-  const canEdit = current?.role === "OWNER" || current?.role === "ADMIN";
+  const canEdit = isAdminRole(entity?.role);
 
   const save = async () => {
     setMsg(null);
@@ -54,7 +57,6 @@ export function YukiPage() {
       setForm({ ...form, accessKey: "" });
       const r = await api<{ connection: ConnectionInfo | null }>("/api/yuki/connection");
       setConn(r.connection);
-      await reload();
     } catch (e) {
       setErr(e instanceof ApiError ? e.message : "Opslaan mislukt");
     } finally {
@@ -80,8 +82,15 @@ export function YukiPage() {
     if (!confirm("Yuki-verbinding loskoppelen?")) return;
     await api("/api/yuki/connection", { method: "DELETE" });
     setConn(null);
-    await reload();
   };
+
+  if (!entity) {
+    return (
+      <div className="lf-card max-w-2xl">
+        Selecteer een administratie in de zijbalk om de Yuki-koppeling te beheren.
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">

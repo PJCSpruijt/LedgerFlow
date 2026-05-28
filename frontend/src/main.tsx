@@ -3,16 +3,16 @@ import ReactDOM from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";
 import { App } from "./App";
 import { AuthProvider } from "./contexts/AuthContext";
-import { OrganizationProvider } from "./contexts/OrganizationContext";
+import { ScopeProvider } from "./contexts/ScopeContext";
 import "./index.css";
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <BrowserRouter>
       <AuthProvider>
-        <OrganizationProvider>
+        <ScopeProvider>
           <App />
-        </OrganizationProvider>
+        </ScopeProvider>
       </AuthProvider>
     </BrowserRouter>
   </React.StrictMode>,

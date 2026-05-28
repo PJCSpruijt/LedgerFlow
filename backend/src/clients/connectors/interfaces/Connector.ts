@@ -1,7 +1,7 @@
 /**
  * Connector abstraction — every accounting system (Yuki today, Exact / Twinfield
  * tomorrow) implements this interface. Routes never depend on a specific connector;
- * they ask the registry for `getConnectorForOrganization(orgId)` and use the result.
+ * they ask the registry for `getConnectorForEntity(entityId)` and use the result.
  */
 
 export interface ConnectorCredentials {

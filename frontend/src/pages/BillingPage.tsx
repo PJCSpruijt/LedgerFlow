@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useLocation } from "react-router-dom";
 import { api, ApiError } from "../services/api";
-import { useOrg } from "../contexts/OrganizationContext";
+import { useScope } from "../contexts/ScopeContext";
 
 type Plan = "STARTER" | "PROFESSIONAL" | "OFFICE";
 
@@ -33,14 +33,14 @@ interface Subscription {
 }
 
 export function BillingPage() {
-  const { current } = useOrg();
+  const { workspace } = useScope();
   const location = useLocation();
   const [sub, setSub] = useState<Subscription | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [busyPlan, setBusyPlan] = useState<Plan | null>(null);
 
   useEffect(() => {
-    if (!current) return;
+    if (!workspace) return;
     void (async () => {
       try {
         const r = await api<{ subscription: Subscription | null }>("/api/billing/subscription");
@@ -49,7 +49,7 @@ export function BillingPage() {
         setErr(e instanceof ApiError ? e.message : "Kon abonnement niet laden");
       }
     })();
-  }, [current]);
+  }, [workspace?.id]);
 
   const startCheckout = async (plan: Plan) => {
     setErr(null);

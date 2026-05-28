@@ -1,5 +1,5 @@
 import type { RequestHandler } from "express";
-import { OrganizationRole, PlatformRole } from "@prisma/client";
+import { PlatformRole, ScopedRole, ScopeLevel } from "@prisma/client";
 import { prisma } from "../config/prisma.js";
 import { verifyAccessToken } from "../services/auth.service.js";
 import { ForbiddenError, UnauthorizedError } from "../utils/errors.js";
@@ -27,53 +27,122 @@ export const requirePlatformAdmin: RequestHandler = (req, _res, next) => {
   next();
 };
 
+// Most-privileged first. Used only to pick the single role we surface for display;
+// authorization guards check the full `roles` set, not this ordering.
+const ROLE_PRIORITY: ScopedRole[] = [
+  ScopedRole.WORKSPACE_ADMIN,
+  ScopedRole.ACCOUNTANT_ADMIN,
+  ScopedRole.CLIENT_ADMIN,
+  ScopedRole.CONSOLIDATION_MANAGER,
+  ScopedRole.MAPPING_MANAGER,
+  ScopedRole.ACCOUNTANT_USER,
+  ScopedRole.CLIENT_USER,
+  ScopedRole.READ_ONLY,
+];
+
+export function topRole(roles: ScopedRole[]): ScopedRole {
+  return ROLE_PRIORITY.find((r) => roles.includes(r)) ?? ScopedRole.READ_ONLY;
+}
+
 /**
- * Require the request to be scoped to an organization the user belongs to.
- * Organization id is taken from header `x-organization-id` or query.organizationId.
- * Populates req.organization.
+ * Resolve the request's scope from the `x-workspace-id` / `x-group-id` /
+ * `x-entity-id` headers (deepest one wins) and the user's memberships, then
+ * populate req.scope. Effective access to an entity is granted by a membership
+ * on that entity, its parent group, or the workspace.
+ *
+ * The platform superuser gets implicit WORKSPACE_ADMIN on any scope chain.
  */
-export const requireOrganization: RequestHandler = async (req, _res, next) => {
+export const requireScope: RequestHandler = async (req, _res, next) => {
   try {
     if (!req.user) throw new UnauthorizedError();
-    const orgId =
-      (req.header("x-organization-id") || (req.query.organizationId as string | undefined) || "")
-        .trim();
-    if (!orgId) throw new ForbiddenError("Missing organization context");
 
-    // Platform superuser has implicit OWNER-level access to every organization,
-    // without requiring a membership row.
+    const workspaceId = (req.header("x-workspace-id") || "").trim();
+    const groupHeader = (req.header("x-group-id") || "").trim() || undefined;
+    const entityHeader = (req.header("x-entity-id") || "").trim() || undefined;
+    if (!workspaceId) throw new ForbiddenError("Missing workspace context");
+
+    // Walk the chain from the deepest provided level and verify the ids actually
+    // belong together, so a caller can't pair an entity with a foreign workspace.
+    let groupId = groupHeader;
+    let entityId = entityHeader;
+    let scopeLevel: ScopeLevel = ScopeLevel.WORKSPACE;
+
+    if (entityHeader) {
+      const entity = await prisma.entity.findUnique({
+        where: { id: entityHeader },
+        include: { group: true },
+      });
+      if (!entity || entity.group.workspaceId !== workspaceId) {
+        throw new ForbiddenError("Entity does not belong to this workspace");
+      }
+      if (groupHeader && groupHeader !== entity.groupId) {
+        throw new ForbiddenError("Entity does not belong to this group");
+      }
+      groupId = entity.groupId;
+      entityId = entity.id;
+      scopeLevel = ScopeLevel.ENTITY;
+    } else if (groupHeader) {
+      const group = await prisma.group.findUnique({ where: { id: groupHeader } });
+      if (!group || group.workspaceId !== workspaceId) {
+        throw new ForbiddenError("Group does not belong to this workspace");
+      }
+      groupId = group.id;
+      scopeLevel = ScopeLevel.GROUP;
+    }
+
     if (isPlatformAdmin(req)) {
-      req.organization = { id: orgId, role: OrganizationRole.OWNER };
+      req.scope = {
+        workspaceId,
+        groupId,
+        entityId,
+        scopeLevel,
+        role: ScopedRole.WORKSPACE_ADMIN,
+        roles: [ScopedRole.WORKSPACE_ADMIN],
+      };
       return next();
     }
 
-    const membership = await prisma.organizationUser.findUnique({
-      where: { userId_organizationId: { userId: req.user.id, organizationId: orgId } },
+    const memberships = await prisma.membership.findMany({
+      where: {
+        userId: req.user.id,
+        OR: [
+          { workspaceId },
+          ...(groupId ? [{ groupId }] : []),
+          ...(entityId ? [{ entityId }] : []),
+        ],
+      },
+      select: { role: true },
     });
-    if (!membership) throw new ForbiddenError("Not a member of this organization");
+    if (memberships.length === 0) {
+      throw new ForbiddenError("No access to this scope");
+    }
+    const roles = [...new Set(memberships.map((m) => m.role))];
 
-    req.organization = { id: orgId, role: membership.role };
+    req.scope = { workspaceId, groupId, entityId, scopeLevel, role: topRole(roles), roles };
     next();
   } catch (err) {
     next(err);
   }
 };
 
-const ROLE_RANK: Record<OrganizationRole, number> = {
-  VIEWER: 0,
-  MEMBER: 1,
-  ADMIN: 2,
-  OWNER: 3,
-};
-
-/** Require the caller's role within the organization to be at least `minRole`. */
-export function requireRole(minRole: OrganizationRole): RequestHandler {
+/**
+ * Require the request's effective scope to include at least one of `allowed`.
+ * Must run after requireScope. The platform superuser always passes.
+ */
+export function requireScopeRole(...allowed: ScopedRole[]): RequestHandler {
   return (req, _res, next) => {
     if (isPlatformAdmin(req)) return next();
-    if (!req.organization) return next(new ForbiddenError("No organization context"));
-    if (ROLE_RANK[req.organization.role] < ROLE_RANK[minRole]) {
-      return next(new ForbiddenError(`Requires role ${minRole}+`));
+    if (!req.scope) return next(new ForbiddenError("No scope context"));
+    if (!req.scope.roles.some((r) => allowed.includes(r))) {
+      return next(new ForbiddenError(`Requires one of: ${allowed.join(", ")}`));
     }
     next();
   };
 }
+
+// Common role groupings, so route declarations stay readable.
+export const SCOPE_ADMIN_ROLES: ScopedRole[] = [
+  ScopedRole.WORKSPACE_ADMIN,
+  ScopedRole.ACCOUNTANT_ADMIN,
+  ScopedRole.CLIENT_ADMIN,
+];

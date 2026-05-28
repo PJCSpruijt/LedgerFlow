@@ -3,13 +3,14 @@ import { z } from "zod";
 import { prisma } from "../config/prisma.js";
 import { asyncHandler } from "../middleware/asyncHandler.js";
 import { validateQuery } from "../middleware/validate.js";
-import { requireAuth, requireOrganization } from "../middleware/auth.js";
+import { requireAuth, requireScope } from "../middleware/auth.js";
 import { requireActiveSubscription } from "../middleware/subscription.js";
-import { getConnectorForOrganization } from "../clients/connectors/registry.js";
+import { getConnectorForEntity } from "../clients/connectors/registry.js";
 import {
   buildTransactionsWorkbook,
   buildTrialBalanceWorkbook,
 } from "../services/export.service.js";
+import { BadRequestError } from "../utils/errors.js";
 
 export const exportRouter = Router();
 
@@ -17,6 +18,13 @@ const RangeQuery = z.object({
   from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
 });
+
+/** Exports run against a single entity, so one must be selected. */
+function requireEntity(req: import("express").Request): string {
+  const entityId = req.scope?.entityId;
+  if (!entityId) throw new BadRequestError("Select an entity (x-entity-id) to export");
+  return entityId;
+}
 
 function sendXlsx(res: import("express").Response, buf: Buffer, filename: string): void {
   res.setHeader(
@@ -31,20 +39,20 @@ function sendXlsx(res: import("express").Response, buf: Buffer, filename: string
 exportRouter.get(
   "/trial-balance.xlsx",
   requireAuth,
-  requireOrganization,
+  requireScope,
   requireActiveSubscription,
   validateQuery(RangeQuery),
   asyncHandler(async (req, res) => {
-    const orgId = req.organization!.id;
-    const [connector, org] = await Promise.all([
-      getConnectorForOrganization(orgId),
-      prisma.organization.findUniqueOrThrow({ where: { id: orgId } }),
+    const entityId = requireEntity(req);
+    const [connector, entity] = await Promise.all([
+      getConnectorForEntity(entityId),
+      prisma.entity.findUniqueOrThrow({ where: { id: entityId } }),
     ]);
     const range = req.query as unknown as { from: string; to: string };
     const rows = await connector.getTrialBalance(range);
     const buf = await buildTrialBalanceWorkbook(
       {
-        organizationName: org.name,
+        entityName: entity.name,
         generatedAt: new Date(),
         from: range.from,
         to: range.to,
@@ -54,7 +62,8 @@ exportRouter.get(
     );
     await prisma.auditLog.create({
       data: {
-        organizationId: orgId,
+        workspaceId: req.scope!.workspaceId,
+        entityId,
         userId: req.user!.id,
         action: "export.trial-balance",
         metadata: { from: range.from, to: range.to, count: rows.length },
@@ -67,20 +76,20 @@ exportRouter.get(
 exportRouter.get(
   "/transactions.xlsx",
   requireAuth,
-  requireOrganization,
+  requireScope,
   requireActiveSubscription,
   validateQuery(RangeQuery),
   asyncHandler(async (req, res) => {
-    const orgId = req.organization!.id;
-    const [connector, org] = await Promise.all([
-      getConnectorForOrganization(orgId),
-      prisma.organization.findUniqueOrThrow({ where: { id: orgId } }),
+    const entityId = requireEntity(req);
+    const [connector, entity] = await Promise.all([
+      getConnectorForEntity(entityId),
+      prisma.entity.findUniqueOrThrow({ where: { id: entityId } }),
     ]);
     const range = req.query as unknown as { from: string; to: string };
     const rows = await connector.getTransactions(range);
     const buf = await buildTransactionsWorkbook(
       {
-        organizationName: org.name,
+        entityName: entity.name,
         generatedAt: new Date(),
         from: range.from,
         to: range.to,
@@ -90,7 +99,8 @@ exportRouter.get(
     );
     await prisma.auditLog.create({
       data: {
-        organizationId: orgId,
+        workspaceId: req.scope!.workspaceId,
+        entityId,
         userId: req.user!.id,
         action: "export.transactions",
         metadata: { from: range.from, to: range.to, count: rows.length },
