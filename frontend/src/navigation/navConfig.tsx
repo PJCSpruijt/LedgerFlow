@@ -6,6 +6,7 @@ import { VatMappingPage } from "../pages/VatMappingPage";
 import { TransactionsPage } from "../pages/TransactionsPage";
 import { GeneralLedgerPage } from "../pages/GeneralLedgerPage";
 import { RelationsView } from "../pages/RelationsPage";
+import { OutstandingView } from "../pages/OutstandingView";
 import { FinancialStatementsPage } from "../pages/FinancialStatementsPage";
 import { BillingPage } from "../pages/BillingPage";
 import { SettingsPage } from "../pages/SettingsPage";
@@ -64,8 +65,8 @@ export const MODULES: ModuleDef[] = [
       { path: "entities", label: "Entities", element: soon("Entities") },
       { path: "transactions", label: "Transactions", element: <TransactionsPage /> },
       { path: "general-ledger", label: "General Ledger", element: <GeneralLedgerPage /> },
-      { path: "receivables", label: "Receivables", element: <RelationsView mode="receivables" /> },
-      { path: "payables", label: "Payables", element: <RelationsView mode="payables" /> },
+      { path: "receivables", label: "Receivables", element: <OutstandingView kind="debtor" /> },
+      { path: "payables", label: "Payables", element: <OutstandingView kind="creditor" /> },
       { path: "relations", label: "Relations", element: <RelationsView mode="all" /> },
       { path: "source-documents", label: "Source Documents", element: soon("Source Documents") },
       { path: "sync-history", label: "Sync History", element: soon("Sync History") },

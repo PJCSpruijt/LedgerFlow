@@ -187,6 +187,21 @@ yukiRouter.get(
   }),
 );
 
+const OutstandingQuery = z.object({ type: z.enum(["debtor", "creditor"]).default("debtor") });
+
+yukiRouter.get(
+  "/outstanding",
+  requireAuth,
+  requireScope,
+  requireActiveSubscription,
+  validateQuery(OutstandingQuery),
+  asyncHandler(async (req, res) => {
+    const { type } = req.query as unknown as { type: "debtor" | "creditor" };
+    const connector = await getConnectorForEntity(requireEntity(req));
+    res.json({ items: await connector.getOutstanding(type) });
+  }),
+);
+
 yukiRouter.get(
   "/debtors",
   requireAuth,

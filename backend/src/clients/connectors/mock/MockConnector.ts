@@ -3,6 +3,7 @@ import type {
   ConnectionTestResult,
   ContactSummary,
   DateRange,
+  OutstandingItem,
   TransactionLine,
   TrialBalanceLine,
 } from "../interfaces/Connector.js";
@@ -87,6 +88,23 @@ export class MockConnector implements Connector {
     return [
       { id: "c1", name: "GitHub Inc.", code: "9921", isDebtor: false, isCreditor: true },
       { id: "c2", name: "BSI Group The Netherlands B.V.", code: "9050", isDebtor: false, isCreditor: true },
+    ];
+  }
+
+  async getOutstanding(kind: "debtor" | "creditor"): Promise<OutstandingItem[]> {
+    const isDebtor = kind === "debtor";
+    return [
+      {
+        relationId: isDebtor ? "d1" : "c1",
+        relationName: isDebtor ? "Klant A B.V." : "GitHub Inc.",
+        relationCode: isDebtor ? "1001" : "9921",
+        invoiceNumber: isDebtor ? "2026-001" : "GH-778",
+        date: "2026-01-15",
+        dueDate: "2026-02-14",
+        totalAmount: isDebtor ? 12500 : 89,
+        openAmount: isDebtor ? 12500 : 89,
+        isDebtor,
+      },
     ];
   }
 }

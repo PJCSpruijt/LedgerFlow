@@ -5,6 +5,7 @@ import type {
   ConnectionTestResult,
   ContactSummary,
   DateRange,
+  OutstandingItem,
   TransactionLine,
   TrialBalanceLine,
 } from "../interfaces/Connector.js";
@@ -414,34 +415,64 @@ export class EboekhoudenConnector implements Connector {
     return out;
   }
 
+  /** Open invoices with amounts, from /v1/mutation/invoice/outstanding (credDeb D/C). */
+  async getOutstanding(kind: "debtor" | "creditor"): Promise<OutstandingItem[]> {
+    const credDeb = kind === "debtor" ? "D" : "C";
+    const out: OutstandingItem[] = [];
+    let offset = 0;
+    for (;;) {
+      let page: ListResponse<Record<string, unknown>>;
+      try {
+        page = await this.client.get<ListResponse<Record<string, unknown>>>(
+          "/v1/mutation/invoice/outstanding",
+          { credDeb, limit: PAGE, offset },
+        );
+      } catch {
+        break;
+      }
+      const items = page.items ?? [];
+      for (const it of items) {
+        const open = Number(it.outstandingAmount) || 0;
+        if (Math.abs(open) < 0.005) continue;
+        out.push({
+          relationId: String(it.relationId ?? ""),
+          relationName: String(it.company ?? ""),
+          relationCode: it.relationCode ? String(it.relationCode) : null,
+          invoiceNumber: it.invoiceNumber ? String(it.invoiceNumber) : null,
+          date: String(it.date ?? "").slice(0, 10),
+          dueDate: null,
+          totalAmount: Number(it.totalAmount) || 0,
+          openAmount: open,
+          isDebtor: kind === "debtor",
+        });
+      }
+      offset += PAGE;
+      if (items.length === 0 || offset >= (page.count ?? 0)) break;
+    }
+    return out;
+  }
+
   async getDebtors(): Promise<ContactSummary[]> {
-    return this.outstanding("D", true);
+    return this.distinctRelations("debtor");
   }
 
   async getCreditors(): Promise<ContactSummary[]> {
-    return this.outstanding("C", false);
+    return this.distinctRelations("creditor");
   }
 
-  /** Outstanding debtor (D) / creditor (C) invoices → distinct relations. */
-  private async outstanding(credDeb: "C" | "D", isDebtor: boolean): Promise<ContactSummary[]> {
-    try {
-      const res = await this.client.get<ListResponse<Record<string, unknown>> | Record<string, unknown>[]>(
-        "/v1/mutation/invoice/outstanding",
-        { credDeb, limit: PAGE },
-      );
-      const items: Record<string, unknown>[] = Array.isArray(res)
-        ? res
-        : ((res as ListResponse<Record<string, unknown>>).items ?? []);
-      const byRel = new Map<number, ContactSummary>();
-      for (const it of items) {
-        const rid = Number(it.relationId ?? it.relationID ?? 0);
-        if (!rid || byRel.has(rid)) continue;
-        const name = (await this.relationName(rid)) ?? String(rid);
-        byRel.set(rid, { id: String(rid), name, code: null, isDebtor, isCreditor: !isDebtor });
-      }
-      return [...byRel.values()];
-    } catch {
-      return [];
+  private async distinctRelations(kind: "debtor" | "creditor"): Promise<ContactSummary[]> {
+    const items = await this.getOutstanding(kind);
+    const byRel = new Map<string, ContactSummary>();
+    for (const it of items) {
+      if (!it.relationId || byRel.has(it.relationId)) continue;
+      byRel.set(it.relationId, {
+        id: it.relationId,
+        name: it.relationName || it.relationId,
+        code: it.relationCode,
+        isDebtor: kind === "debtor",
+        isCreditor: kind === "creditor",
+      });
     }
+    return [...byRel.values()];
   }
 }

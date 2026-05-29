@@ -70,6 +70,22 @@ export interface ContactSummary {
   isCreditor: boolean;
 }
 
+/** A single outstanding (open) invoice for receivables/payables + aging. */
+export interface OutstandingItem {
+  relationId: string;
+  relationName: string;
+  relationCode: string | null;
+  invoiceNumber: string | null;
+  /** Invoice date (ISO yyyy-MM-dd). */
+  date: string;
+  /** Due date (ISO) when the source provides it; aging falls back to `date`. */
+  dueDate: string | null;
+  totalAmount: number;
+  /** Still-open amount. */
+  openAmount: number;
+  isDebtor: boolean;
+}
+
 export interface ConnectionTestResult {
   ok: boolean;
   message: string;
@@ -87,4 +103,7 @@ export interface Connector {
 
   getDebtors(): Promise<ContactSummary[]>;
   getCreditors(): Promise<ContactSummary[]>;
+
+  /** Open invoices for receivables (debtor) or payables (creditor), with amounts. */
+  getOutstanding(kind: "debtor" | "creditor"): Promise<OutstandingItem[]>;
 }

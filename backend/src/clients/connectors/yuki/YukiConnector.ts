@@ -6,6 +6,7 @@ import type {
   ConnectionTestResult,
   ContactSummary,
   DateRange,
+  OutstandingItem,
   TransactionLine,
   TrialBalanceLine,
 } from "../interfaces/Connector.js";
@@ -420,61 +421,70 @@ export class YukiConnector implements Connector {
   }
 
   async getDebtors(): Promise<ContactSummary[]> {
-    return this.outstandingItems("OutstandingDebtorItems", true);
+    return this.distinctRelations("debtor");
   }
 
   async getCreditors(): Promise<ContactSummary[]> {
-    return this.outstandingItems("OutstandingCreditorItems", false);
+    return this.distinctRelations("creditor");
+  }
+
+  private async distinctRelations(kind: "debtor" | "creditor"): Promise<ContactSummary[]> {
+    const items = await this.getOutstanding(kind);
+    const byKey = new Map<string, ContactSummary>();
+    for (const it of items) {
+      const key = it.relationId || it.relationName;
+      if (!key || byKey.has(key)) continue;
+      byKey.set(key, {
+        id: it.relationId || key,
+        name: it.relationName || key,
+        code: it.relationCode,
+        isDebtor: kind === "debtor",
+        isCreditor: kind === "creditor",
+      });
+    }
+    return [...byKey.values()];
   }
 
   /**
-   * Outstanding debtor/creditor items via Accounting.OutstandingDebtorItems /
-   * Accounting.OutstandingCreditorItems.
-   *
-   * WSDL requires four params: sessionID, administrationID, includeBankTransactions
-   * (boolean), sortOrder (enum tns:OutstandingItemsSortOrder — "ContactName" is the
-   * safest default; "DueDate" / "InvoiceDate" / "InvoiceNumber" also valid).
+   * Open invoices via Accounting.OutstandingDebtorItems / OutstandingCreditorItems.
+   * IMPORTANT: call with ONLY sessionID + administrationID — passing
+   * includeBankTransactions/sortOrder makes Yuki return HTTP 500. The result is
+   * an object whose container is the method name, e.g.
+   * `OutstandingDebtorItems.Item[]`, with Date / Contact / OpenAmount /
+   * OriginalAmount / Reference / DueDate / ContactID / ContactCode fields.
    */
-  private async outstandingItems(
-    method: "OutstandingDebtorItems" | "OutstandingCreditorItems",
-    isDebtor: boolean,
-  ): Promise<ContactSummary[]> {
+  async getOutstanding(kind: "debtor" | "creditor"): Promise<OutstandingItem[]> {
+    const method = kind === "debtor" ? "OutstandingDebtorItems" : "OutstandingCreditorItems";
     const sessionId = await this.session();
     const body =
       `<${method} xmlns="${NAMESPACE}">` +
       `<sessionID>${escapeXml(sessionId)}</sessionID>` +
       `<administrationID>${escapeXml(this.creds.administrationId)}</administrationID>` +
-      `<includeBankTransactions>false</includeBankTransactions>` +
-      `<sortOrder>ContactName</sortOrder>` +
       `</${method}>`;
     try {
       const env = await this.soap.call({ bodyXml: body, method, service: "Accounting" });
       const result = (env as Record<string, any>)?.[`${method}Response`]?.[`${method}Result`];
-      const inner = parseEmbeddedXml(result);
-      const rows: Array<Record<string, unknown>> =
-        (inner?.OutstandingItems?.Item as Array<Record<string, unknown>> | undefined) ??
-        (inner?.Items?.Item as Array<Record<string, unknown>> | undefined) ??
-        (inner?.Contacts?.Contact as Array<Record<string, unknown>> | undefined) ??
-        [];
-
-      // De-dupe by contact name/code since outstanding-items lists one row per invoice.
-      const byKey = new Map<string, ContactSummary>();
-      for (const r of rows) {
-        const name = String(r.ContactName ?? r.Name ?? r.Debtor ?? r.Creditor ?? "");
-        const code = r.ContactCode ? String(r.ContactCode) : r.Code ? String(r.Code) : null;
-        const key = code || name;
-        if (!key) continue;
-        if (!byKey.has(key)) {
-          byKey.set(key, {
-            id: String(r.ContactID ?? r.ID ?? key),
-            name,
-            code,
-            isDebtor,
-            isCreditor: !isDebtor,
-          });
-        }
-      }
-      return [...byKey.values()];
+      const inner = parseEmbeddedXml(result) ?? result;
+      const rawRows = inner?.[method]?.Item ?? inner?.Item ?? [];
+      const rows: Array<Record<string, unknown>> = Array.isArray(rawRows)
+        ? (rawRows as Array<Record<string, unknown>>)
+        : rawRows && typeof rawRows === "object"
+          ? [rawRows as Record<string, unknown>]
+          : [];
+      return rows.map((r) => {
+        const cid = Array.isArray(r.ContactID) ? r.ContactID[0] : r.ContactID;
+        return {
+          relationId: cid ? String(cid) : "",
+          relationName: str(r.Contact ?? r.ContactName ?? ""),
+          relationCode: r.ContactCode ? str(r.ContactCode) : null,
+          invoiceNumber: r.Reference !== undefined && r.Reference !== null ? String(r.Reference) : null,
+          date: str(r.Date).slice(0, 10),
+          dueDate: r.DueDate ? str(r.DueDate).slice(0, 10) : null,
+          totalAmount: num(r.OriginalAmount ?? r.OpenAmount),
+          openAmount: num(r.OpenAmount ?? r.OriginalAmount),
+          isDebtor: kind === "debtor",
+        };
+      });
     } catch {
       return [];
     }
