@@ -5,6 +5,7 @@ import { randomBytes } from "node:crypto";
 import {
   BillingInterval,
   PlatformRole,
+  Prisma,
   ScopedRole,
   ScopeLevel,
   SubscriptionPlan,
@@ -674,3 +675,239 @@ async function firstWorkspaceId(userId: string): Promise<string | null> {
   });
   return m?.workspaceId ?? null;
 }
+
+/* -------------------------------------------------------------------------- */
+/*  Memberships (couple a user to a workspace / group / administration)       */
+/* -------------------------------------------------------------------------- */
+
+/** List a user's memberships with a readable scope label. */
+adminRouter.get(
+  "/users/:id/memberships",
+  validateParams(UserIdParam),
+  asyncHandler(async (req, res) => {
+    const { id } = req.params as z.infer<typeof UserIdParam>;
+    const user = await prisma.user.findUnique({ where: { id }, select: { id: true } });
+    if (!user) throw new NotFoundError("Gebruiker niet gevonden");
+    const memberships = await prisma.membership.findMany({
+      where: { userId: id },
+      include: {
+        workspace: { select: { name: true } },
+        group: { select: { name: true } },
+        entity: { select: { name: true } },
+      },
+      orderBy: { createdAt: "asc" },
+    });
+    res.json({
+      memberships: memberships.map((m) => ({
+        id: m.id,
+        scopeLevel: m.scopeLevel,
+        role: m.role,
+        scopeName:
+          m.workspace?.name ?? m.group?.name ?? m.entity?.name ?? "(onbekend)",
+        workspaceId: m.workspaceId,
+        groupId: m.groupId,
+        entityId: m.entityId,
+      })),
+    });
+  }),
+);
+
+const MembershipCreateSchema = z.object({
+  scopeLevel: z.nativeEnum(ScopeLevel),
+  scopeId: z.string().uuid(),
+  role: z.nativeEnum(ScopedRole),
+});
+
+/** Grant a user a role at a workspace / group / entity scope. */
+adminRouter.post(
+  "/users/:id/memberships",
+  validateParams(UserIdParam),
+  validateBody(MembershipCreateSchema),
+  asyncHandler(async (req, res) => {
+    const { id } = req.params as z.infer<typeof UserIdParam>;
+    const body = req.body as z.infer<typeof MembershipCreateSchema>;
+    const user = await prisma.user.findUnique({ where: { id }, select: { id: true } });
+    if (!user) throw new NotFoundError("Gebruiker niet gevonden");
+
+    // Verify the referenced scope exists, and set exactly the matching FK.
+    const data: Prisma.MembershipUncheckedCreateInput = {
+      userId: id,
+      scopeLevel: body.scopeLevel,
+      role: body.role,
+    };
+    if (body.scopeLevel === ScopeLevel.WORKSPACE) {
+      const ws = await prisma.workspace.findUnique({ where: { id: body.scopeId } });
+      if (!ws) throw new BadRequestError("Onbekende werkruimte");
+      data.workspaceId = body.scopeId;
+    } else if (body.scopeLevel === ScopeLevel.GROUP) {
+      const g = await prisma.group.findUnique({ where: { id: body.scopeId } });
+      if (!g) throw new BadRequestError("Onbekende groep");
+      data.groupId = body.scopeId;
+    } else {
+      const e = await prisma.entity.findUnique({ where: { id: body.scopeId } });
+      if (!e) throw new BadRequestError("Onbekende administratie");
+      data.entityId = body.scopeId;
+    }
+
+    try {
+      const created = await prisma.membership.create({ data });
+      res.status(201).json({ membership: { id: created.id } });
+    } catch (e) {
+      if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {
+        throw new ConflictError("Gebruiker heeft al een rol op dit niveau");
+      }
+      throw e;
+    }
+  }),
+);
+
+const RoleSchema = z.object({ role: z.nativeEnum(ScopedRole) });
+
+/** Change a membership's role. */
+adminRouter.patch(
+  "/memberships/:id",
+  validateParams(IdParam),
+  validateBody(RoleSchema),
+  asyncHandler(async (req, res) => {
+    const { id } = req.params as z.infer<typeof IdParam>;
+    const existing = await prisma.membership.findUnique({ where: { id } });
+    if (!existing) throw new NotFoundError("Membership niet gevonden");
+    const m = await prisma.membership.update({ where: { id }, data: { role: req.body.role } });
+    res.json({ membership: { id: m.id, role: m.role } });
+  }),
+);
+
+/** Revoke a membership. */
+adminRouter.delete(
+  "/memberships/:id",
+  validateParams(IdParam),
+  asyncHandler(async (req, res) => {
+    const { id } = req.params as z.infer<typeof IdParam>;
+    const existing = await prisma.membership.findUnique({ where: { id } });
+    if (!existing) throw new NotFoundError("Membership niet gevonden");
+    await prisma.membership.delete({ where: { id } });
+    res.status(204).end();
+  }),
+);
+
+/* -------------------------------------------------------------------------- */
+/*  Workspace / group / administration edit + delete                         */
+/* -------------------------------------------------------------------------- */
+
+const WorkspaceUpdateSchema = z.object({
+  name: z.string().min(1).max(120).optional(),
+  type: z.nativeEnum(WorkspaceType).optional(),
+});
+
+adminRouter.patch(
+  "/workspaces/:id",
+  validateParams(IdParam),
+  validateBody(WorkspaceUpdateSchema),
+  asyncHandler(async (req, res) => {
+    const { id } = req.params as z.infer<typeof IdParam>;
+    const body = req.body as z.infer<typeof WorkspaceUpdateSchema>;
+    const existing = await prisma.workspace.findUnique({ where: { id } });
+    if (!existing) throw new NotFoundError("Werkruimte niet gevonden");
+    const ws = await prisma.workspace.update({
+      where: { id },
+      data: { name: body.name, type: body.type },
+      select: { id: true, name: true, type: true },
+    });
+    res.json({ workspace: ws });
+  }),
+);
+
+/** Delete a workspace and everything under it (groups, entities, memberships,
+ * subscription, audit logs cascade via the schema). */
+adminRouter.delete(
+  "/workspaces/:id",
+  validateParams(IdParam),
+  asyncHandler(async (req, res) => {
+    const { id } = req.params as z.infer<typeof IdParam>;
+    const existing = await prisma.workspace.findUnique({ where: { id } });
+    if (!existing) throw new NotFoundError("Werkruimte niet gevonden");
+    await prisma.workspace.delete({ where: { id } });
+    res.status(204).end();
+  }),
+);
+
+const NameSchema = z.object({ name: z.string().min(1).max(120) });
+
+/** Create a group in a workspace. */
+adminRouter.post(
+  "/workspaces/:id/groups",
+  validateParams(IdParam),
+  validateBody(NameSchema),
+  asyncHandler(async (req, res) => {
+    const { id } = req.params as z.infer<typeof IdParam>;
+    const ws = await prisma.workspace.findUnique({ where: { id } });
+    if (!ws) throw new NotFoundError("Werkruimte niet gevonden");
+    const group = await prisma.group.create({ data: { name: req.body.name, workspaceId: id } });
+    res.status(201).json({ group: { id: group.id, name: group.name } });
+  }),
+);
+
+adminRouter.patch(
+  "/groups/:id",
+  validateParams(IdParam),
+  validateBody(NameSchema),
+  asyncHandler(async (req, res) => {
+    const { id } = req.params as z.infer<typeof IdParam>;
+    const existing = await prisma.group.findUnique({ where: { id } });
+    if (!existing) throw new NotFoundError("Groep niet gevonden");
+    const group = await prisma.group.update({ where: { id }, data: { name: req.body.name } });
+    res.json({ group: { id: group.id, name: group.name } });
+  }),
+);
+
+adminRouter.delete(
+  "/groups/:id",
+  validateParams(IdParam),
+  asyncHandler(async (req, res) => {
+    const { id } = req.params as z.infer<typeof IdParam>;
+    const existing = await prisma.group.findUnique({ where: { id } });
+    if (!existing) throw new NotFoundError("Groep niet gevonden");
+    await prisma.group.delete({ where: { id } });
+    res.status(204).end();
+  }),
+);
+
+/** Create an administration (entity) in a group. */
+adminRouter.post(
+  "/groups/:id/entities",
+  validateParams(IdParam),
+  validateBody(NameSchema),
+  asyncHandler(async (req, res) => {
+    const { id } = req.params as z.infer<typeof IdParam>;
+    const group = await prisma.group.findUnique({ where: { id } });
+    if (!group) throw new NotFoundError("Groep niet gevonden");
+    const entity = await prisma.entity.create({ data: { name: req.body.name, groupId: id } });
+    res.status(201).json({ entity: { id: entity.id, name: entity.name, groupId: entity.groupId } });
+  }),
+);
+
+adminRouter.patch(
+  "/entities/:id",
+  validateParams(IdParam),
+  validateBody(NameSchema),
+  asyncHandler(async (req, res) => {
+    const { id } = req.params as z.infer<typeof IdParam>;
+    const existing = await prisma.entity.findUnique({ where: { id } });
+    if (!existing) throw new NotFoundError("Administratie niet gevonden");
+    const entity = await prisma.entity.update({ where: { id }, data: { name: req.body.name } });
+    res.json({ entity: { id: entity.id, name: entity.name } });
+  }),
+);
+
+/** Delete an administration (its Yuki connection cascades). */
+adminRouter.delete(
+  "/entities/:id",
+  validateParams(IdParam),
+  asyncHandler(async (req, res) => {
+    const { id } = req.params as z.infer<typeof IdParam>;
+    const existing = await prisma.entity.findUnique({ where: { id } });
+    if (!existing) throw new NotFoundError("Administratie niet gevonden");
+    await prisma.entity.delete({ where: { id } });
+    res.status(204).end();
+  }),
+);

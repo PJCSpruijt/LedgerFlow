@@ -269,6 +269,66 @@ export function AdminPage() {
   const [err, setErr] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [showNewWs, setShowNewWs] = useState(false);
+  const [editWs, setEditWs] = useState<{ id: string; name: string; type: string } | null>(null);
+
+  const run = async (fn: () => Promise<unknown>) => {
+    setErr(null);
+    try {
+      await fn();
+      await loadWorkspaces();
+    } catch (e) {
+      setErr(e instanceof ApiError ? e.message : "Actie mislukt");
+    }
+  };
+
+  const saveWs = () =>
+    run(async () => {
+      if (!editWs) return;
+      await api(`/api/admin/workspaces/${editWs.id}`, {
+        method: "PATCH",
+        body: { name: editWs.name, type: editWs.type },
+      });
+      setEditWs(null);
+    });
+  const deleteWs = (ws: AdminWorkspace) =>
+    run(async () => {
+      if (!window.confirm(`Werkruimte "${ws.name}" en ALLES eronder verwijderen?`)) return;
+      await api(`/api/admin/workspaces/${ws.id}`, { method: "DELETE" });
+    });
+  const addGroup = (ws: AdminWorkspace) =>
+    run(async () => {
+      const name = window.prompt("Naam van de nieuwe groep:");
+      if (!name?.trim()) return;
+      await api(`/api/admin/workspaces/${ws.id}/groups`, { method: "POST", body: { name: name.trim() } });
+    });
+  const renameGroup = (g: AdminGroup) =>
+    run(async () => {
+      const name = window.prompt("Nieuwe groepnaam:", g.name);
+      if (!name?.trim() || name === g.name) return;
+      await api(`/api/admin/groups/${g.id}`, { method: "PATCH", body: { name: name.trim() } });
+    });
+  const deleteGroup = (g: AdminGroup) =>
+    run(async () => {
+      if (!window.confirm(`Groep "${g.name}" en de administraties erin verwijderen?`)) return;
+      await api(`/api/admin/groups/${g.id}`, { method: "DELETE" });
+    });
+  const addEntity = (g: AdminGroup) =>
+    run(async () => {
+      const name = window.prompt("Naam van de nieuwe administratie:");
+      if (!name?.trim()) return;
+      await api(`/api/admin/groups/${g.id}/entities`, { method: "POST", body: { name: name.trim() } });
+    });
+  const renameEntity = (e: AdminEntity) =>
+    run(async () => {
+      const name = window.prompt("Nieuwe naam administratie:", e.name);
+      if (!name?.trim() || name === e.name) return;
+      await api(`/api/admin/entities/${e.id}`, { method: "PATCH", body: { name: name.trim() } });
+    });
+  const deleteEntity = (e: AdminEntity) =>
+    run(async () => {
+      if (!window.confirm(`Administratie "${e.name}" verwijderen?`)) return;
+      await api(`/api/admin/entities/${e.id}`, { method: "DELETE" });
+    });
 
   const loadWorkspaces = async () => {
     const w = await api<{ workspaces: AdminWorkspace[] }>("/api/admin/workspaces");
@@ -403,12 +463,65 @@ export function AdminPage() {
                 </div>
               </div>
 
+              <div className="mt-2 flex flex-wrap gap-4 text-xs">
+                <button
+                  className="lf-link"
+                  onClick={() => setEditWs({ id: ws.id, name: ws.name, type: ws.type })}
+                >
+                  Bewerken
+                </button>
+                <button className="lf-link" onClick={() => addGroup(ws)}>
+                  + Groep
+                </button>
+                <button className="text-red-600 hover:underline" onClick={() => deleteWs(ws)}>
+                  Verwijderen
+                </button>
+              </div>
+
+              {editWs?.id === ws.id && (
+                <div className="mt-2 flex flex-wrap items-end gap-2">
+                  <input
+                    className="lf-input text-xs"
+                    value={editWs.name}
+                    onChange={(e) => setEditWs({ ...editWs, name: e.target.value })}
+                  />
+                  <select
+                    className="lf-input text-xs"
+                    value={editWs.type}
+                    onChange={(e) => setEditWs({ ...editWs, type: e.target.value })}
+                  >
+                    <option value="COMPANY">Bedrijf</option>
+                    <option value="ACCOUNTING_FIRM">Accountantskantoor</option>
+                  </select>
+                  <button className="lf-btn-primary text-xs" onClick={saveWs}>
+                    Opslaan
+                  </button>
+                  <button className="lf-btn-secondary text-xs" onClick={() => setEditWs(null)}>
+                    Annuleren
+                  </button>
+                </div>
+              )}
+
               <SubscriptionEditor workspace={ws} plans={plans} onSaved={loadWorkspaces} />
 
               <div className="mt-3 space-y-3">
                 {ws.groups.map((g) => (
                   <div key={g.id} className="pl-3 border-l-2 border-slate-200">
-                    <div className="text-sm font-medium text-slate-700">{g.name}</div>
+                    <div className="flex items-center gap-3">
+                      <div className="text-sm font-medium text-slate-700">{g.name}</div>
+                      <button className="lf-link text-xs" onClick={() => renameGroup(g)}>
+                        Hernoemen
+                      </button>
+                      <button className="lf-link text-xs" onClick={() => addEntity(g)}>
+                        + Administratie
+                      </button>
+                      <button
+                        className="text-xs text-red-600 hover:underline"
+                        onClick={() => deleteGroup(g)}
+                      >
+                        Verwijderen
+                      </button>
+                    </div>
                     {g.entities.length === 0 ? (
                       <div className="text-xs text-slate-400 mt-1">Geen administraties</div>
                     ) : (
@@ -428,6 +541,15 @@ export function AdminPage() {
                                 Niet gekoppeld
                               </span>
                             )}
+                            <button className="lf-link text-xs" onClick={() => renameEntity(e)}>
+                              Hernoemen
+                            </button>
+                            <button
+                              className="text-xs text-red-600 hover:underline"
+                              onClick={() => deleteEntity(e)}
+                            >
+                              Verwijderen
+                            </button>
                           </li>
                         ))}
                       </ul>
