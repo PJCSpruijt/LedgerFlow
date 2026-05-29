@@ -5,9 +5,12 @@ import { randomBytes } from "node:crypto";
 import {
   BillingInterval,
   PlatformRole,
+  ScopedRole,
+  ScopeLevel,
   SubscriptionPlan,
   SubscriptionStatus,
   UserTokenKind,
+  WorkspaceType,
 } from "@prisma/client";
 import { prisma } from "../config/prisma.js";
 import { env } from "../config/env.js";
@@ -122,6 +125,78 @@ adminRouter.get(
           })),
         })),
       })),
+    });
+  }),
+);
+
+/** Manually create a workspace (with a first group + administration), optionally
+ * assigning an owner who becomes WORKSPACE_ADMIN. Platform admins always see all
+ * workspaces, so an owner is optional. */
+const WorkspaceCreateSchema = z.object({
+  name: z.string().min(1).max(120),
+  type: z.nativeEnum(WorkspaceType).default(WorkspaceType.COMPANY),
+  groupName: z.string().min(1).max(120).optional(),
+  entityName: z.string().min(1).max(120).optional(),
+  ownerUserId: z.string().uuid().optional(),
+});
+
+adminRouter.post(
+  "/workspaces",
+  validateBody(WorkspaceCreateSchema),
+  asyncHandler(async (req, res) => {
+    const body = req.body as z.infer<typeof WorkspaceCreateSchema>;
+
+    const workspace = await prisma.$transaction(async (tx) => {
+      if (body.ownerUserId) {
+        const owner = await tx.user.findUnique({ where: { id: body.ownerUserId } });
+        if (!owner) throw new BadRequestError("Onbekende eigenaar");
+      }
+      const created = await tx.workspace.create({
+        data: {
+          name: body.name,
+          type: body.type,
+          groups: {
+            create: {
+              name: body.groupName?.trim() || body.name,
+              entities: { create: { name: body.entityName?.trim() || body.name } },
+            },
+          },
+        },
+        include: { groups: { include: { entities: true } } },
+      });
+      await tx.subscription.create({ data: { workspaceId: created.id, status: "NONE" } });
+      if (body.ownerUserId) {
+        await tx.membership.create({
+          data: {
+            userId: body.ownerUserId,
+            scopeLevel: ScopeLevel.WORKSPACE,
+            role: ScopedRole.WORKSPACE_ADMIN,
+            workspaceId: created.id,
+          },
+        });
+      }
+      await tx.auditLog.create({
+        data: {
+          workspaceId: created.id,
+          userId: req.user!.id,
+          action: "admin.workspace.created",
+          metadata: { ownerUserId: body.ownerUserId ?? null, type: body.type },
+        },
+      });
+      return created;
+    });
+
+    res.status(201).json({
+      workspace: {
+        id: workspace.id,
+        name: workspace.name,
+        type: workspace.type,
+        groups: workspace.groups.map((g) => ({
+          id: g.id,
+          name: g.name,
+          entities: g.entities.map((e) => ({ id: e.id, name: e.name })),
+        })),
+      },
     });
   }),
 );

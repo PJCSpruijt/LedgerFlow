@@ -158,12 +158,117 @@ function SubscriptionEditor({
   );
 }
 
+function NewWorkspaceForm({
+  users,
+  onCreated,
+  onCancel,
+}: {
+  users: AdminUser[];
+  onCreated: () => void | Promise<void>;
+  onCancel: () => void;
+}) {
+  const [name, setName] = useState("");
+  const [type, setType] = useState<"COMPANY" | "ACCOUNTING_FIRM">("COMPANY");
+  const [groupName, setGroupName] = useState("");
+  const [entityName, setEntityName] = useState("");
+  const [ownerUserId, setOwnerUserId] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  const save = async () => {
+    setErr(null);
+    setBusy(true);
+    try {
+      await api("/api/admin/workspaces", {
+        method: "POST",
+        body: {
+          name: name.trim(),
+          type,
+          groupName: groupName.trim() || undefined,
+          entityName: entityName.trim() || undefined,
+          ownerUserId: ownerUserId || undefined,
+        },
+      });
+      await onCreated();
+    } catch (e) {
+      setErr(e instanceof ApiError ? e.message : "Aanmaken mislukt");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="mb-4 rounded-md bg-slate-50 border border-slate-200 p-4 space-y-3">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        <div>
+          <label className="lf-label">Naam werkruimte</label>
+          <input className="lf-input" value={name} onChange={(e) => setName(e.target.value)} />
+        </div>
+        <div>
+          <label className="lf-label">Type</label>
+          <select
+            className="lf-input"
+            value={type}
+            onChange={(e) => setType(e.target.value as "COMPANY" | "ACCOUNTING_FIRM")}
+          >
+            <option value="COMPANY">Bedrijf</option>
+            <option value="ACCOUNTING_FIRM">Accountantskantoor</option>
+          </select>
+        </div>
+        <div>
+          <label className="lf-label">Groepnaam (optioneel)</label>
+          <input
+            className="lf-input"
+            placeholder={name || "= naam werkruimte"}
+            value={groupName}
+            onChange={(e) => setGroupName(e.target.value)}
+          />
+        </div>
+        <div>
+          <label className="lf-label">Eerste administratie (optioneel)</label>
+          <input
+            className="lf-input"
+            placeholder={name || "= naam werkruimte"}
+            value={entityName}
+            onChange={(e) => setEntityName(e.target.value)}
+          />
+        </div>
+        <div className="md:col-span-2">
+          <label className="lf-label">Eigenaar (optioneel)</label>
+          <select
+            className="lf-input"
+            value={ownerUserId}
+            onChange={(e) => setOwnerUserId(e.target.value)}
+          >
+            <option value="">Geen (alleen platformbeheerders zien deze werkruimte)</option>
+            {users.map((u) => (
+              <option key={u.id} value={u.id}>
+                {u.firstName} {u.lastName} — {u.email}
+              </option>
+            ))}
+          </select>
+        </div>
+      </div>
+      {err && <div className="text-sm text-red-600">{err}</div>}
+      <div className="flex gap-3">
+        <button className="lf-btn-primary" onClick={save} disabled={busy || !name.trim()}>
+          {busy ? "Aanmaken…" : "Werkruimte aanmaken"}
+        </button>
+        <button className="lf-btn-secondary" onClick={onCancel} disabled={busy}>
+          Annuleren
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export function AdminPage() {
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [workspaces, setWorkspaces] = useState<AdminWorkspace[]>([]);
   const [plans, setPlans] = useState<AdminPlan[]>([]);
   const [err, setErr] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [showNewWs, setShowNewWs] = useState(false);
 
   const loadWorkspaces = async () => {
     const w = await api<{ workspaces: AdminWorkspace[] }>("/api/admin/workspaces");
@@ -253,7 +358,26 @@ export function AdminPage() {
       </div>
 
       <div className="lf-card">
-        <h2 className="text-lg font-semibold mb-3">Werkruimtes &amp; administraties</h2>
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="text-lg font-semibold">Werkruimtes &amp; administraties</h2>
+          <button
+            className="lf-btn-primary"
+            onClick={() => setShowNewWs((v) => !v)}
+            disabled={showNewWs}
+          >
+            + Nieuwe werkruimte
+          </button>
+        </div>
+        {showNewWs && (
+          <NewWorkspaceForm
+            users={users}
+            onCancel={() => setShowNewWs(false)}
+            onCreated={async () => {
+              setShowNewWs(false);
+              await loadWorkspaces();
+            }}
+          />
+        )}
         <div className="space-y-5">
           {workspaces.map((ws) => (
             <div key={ws.id} className="border border-slate-200 rounded-lg p-4">
