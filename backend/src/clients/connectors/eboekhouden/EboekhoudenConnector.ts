@@ -5,6 +5,7 @@ import type {
   ConnectionTestResult,
   ContactSummary,
   DateRange,
+  InvoiceDocument,
   OutstandingItem,
   TransactionLine,
   TrialBalanceLine,
@@ -434,22 +435,86 @@ export class EboekhoudenConnector implements Connector {
       for (const it of items) {
         const open = Number(it.outstandingAmount) || 0;
         if (Math.abs(open) < 0.005) continue;
+        const date = String(it.date ?? "").slice(0, 10);
         out.push({
           relationId: String(it.relationId ?? ""),
           relationName: String(it.company ?? ""),
           relationCode: it.relationCode ? String(it.relationCode) : null,
           invoiceNumber: it.invoiceNumber ? String(it.invoiceNumber) : null,
-          date: String(it.date ?? "").slice(0, 10),
+          date,
           dueDate: null,
           totalAmount: Number(it.totalAmount) || 0,
           openAmount: open,
           isDebtor: kind === "debtor",
-        });
+          // Sales invoices (debtor) have a retrievable PDF via /v1/invoice;
+          // purchase invoices (creditor) have none in the REST API.
+          documentId: kind === "debtor" && it.invoiceNumber ? String(it.invoiceNumber) : null,
+          // Stash the mutationId on a throwaway field for due-date enrichment below.
+          __mutationId: it.mutationId,
+        } as OutstandingItem & { __mutationId?: number });
       }
       offset += PAGE;
       if (items.length === 0 || offset >= (page.count ?? 0)) break;
     }
+
+    // Derive due dates from each mutation's payment term (mutationDate + termOfPayment),
+    // in small concurrent batches to limit round-trips.
+    const withMut = out as Array<OutstandingItem & { __mutationId?: number }>;
+    const BATCH = 8;
+    for (let i = 0; i < withMut.length; i += BATCH) {
+      await Promise.all(
+        withMut.slice(i, i + BATCH).map(async (item) => {
+          const mid = item.__mutationId;
+          delete item.__mutationId;
+          if (!mid) return;
+          try {
+            const m = await this.client.get<{ date?: string; termOfPayment?: number }>(
+              `/v1/mutation/${mid}`,
+            );
+            const term = Number(m.termOfPayment) || 0;
+            const base = m.date ? new Date(m.date) : item.date ? new Date(item.date) : null;
+            if (base && !Number.isNaN(base.getTime())) {
+              item.dueDate = new Date(base.getTime() + term * 86_400_000).toISOString().slice(0, 10);
+            }
+          } catch {
+            /* leave dueDate null */
+          }
+        }),
+      );
+    }
     return out;
+  }
+
+  /**
+   * Fetch a SALES invoice PDF: resolve the invoice number to its id, then stream
+   * the (public, pre-signed) urlPdfFile. Purchase invoices have no PDF in the
+   * REST API → null.
+   */
+  async getInvoicePdf(ref: string): Promise<InvoiceDocument | null> {
+    if (!ref) return null;
+    try {
+      const list = await this.client.get<ListResponse<{ id: number; invoiceNumber?: string }>>(
+        "/v1/invoice",
+        { invoiceNumber: ref, limit: 5 },
+      );
+      const match =
+        (list.items ?? []).find((i) => String(i.invoiceNumber) === ref) ?? list.items?.[0];
+      if (!match) return null;
+      const det = await this.client.get<{ urlPdfFile?: string; invoiceNumber?: string }>(
+        `/v1/invoice/${match.id}`,
+      );
+      if (!det.urlPdfFile) return null;
+      const res = await fetch(det.urlPdfFile);
+      if (!res.ok) return null;
+      const data = Buffer.from(await res.arrayBuffer());
+      return {
+        fileName: `${det.invoiceNumber ?? ref}.pdf`,
+        contentType: res.headers.get("content-type") ?? "application/pdf",
+        data,
+      };
+    } catch {
+      return null;
+    }
   }
 
   async getDebtors(): Promise<ContactSummary[]> {

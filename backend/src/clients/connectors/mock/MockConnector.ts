@@ -3,6 +3,7 @@ import type {
   ConnectionTestResult,
   ContactSummary,
   DateRange,
+  InvoiceDocument,
   OutstandingItem,
   TransactionLine,
   TrialBalanceLine,
@@ -104,8 +105,13 @@ export class MockConnector implements Connector {
         totalAmount: isDebtor ? 12500 : 89,
         openAmount: isDebtor ? 12500 : 89,
         isDebtor,
+        documentId: null,
       },
     ];
+  }
+
+  async getInvoicePdf(_ref: string): Promise<InvoiceDocument | null> {
+    return null;
   }
 }
 

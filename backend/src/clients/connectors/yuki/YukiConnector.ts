@@ -6,6 +6,7 @@ import type {
   ConnectionTestResult,
   ContactSummary,
   DateRange,
+  InvoiceDocument,
   OutstandingItem,
   TransactionLine,
   TrialBalanceLine,
@@ -483,10 +484,44 @@ export class YukiConnector implements Connector {
           totalAmount: num(r.OriginalAmount ?? r.OpenAmount),
           openAmount: num(r.OpenAmount ?? r.OriginalAmount),
           isDebtor: kind === "debtor",
+          // The item's own GUID (`ID`) is the transactionID for GetTransactionDocument.
+          documentId: r.ID ? str(r.ID) : null,
         };
       });
     } catch {
       return [];
+    }
+  }
+
+  /**
+   * Fetch an invoice PDF via AccountingInfo.GetTransactionDocument(sessionID,
+   * administrationID, transactionID). `ref` is the OutstandingItem.ID. Returns
+   * { fileName, filedata(base64) } → decoded Buffer. Works for purchase + sales.
+   */
+  async getInvoicePdf(ref: string): Promise<InvoiceDocument | null> {
+    if (!ref) return null;
+    const sessionId = await this.session();
+    const body =
+      `<GetTransactionDocument xmlns="${NAMESPACE}">` +
+      `<sessionID>${escapeXml(sessionId)}</sessionID>` +
+      `<administrationID>${escapeXml(this.creds.administrationId)}</administrationID>` +
+      `<transactionID>${escapeXml(ref)}</transactionID>` +
+      `</GetTransactionDocument>`;
+    try {
+      const env = await this.soap.call({
+        bodyXml: body,
+        method: "GetTransactionDocument",
+        service: "AccountingInfo",
+      });
+      const res = (env as any)?.GetTransactionDocumentResponse?.GetTransactionDocumentResult;
+      const b64 = res?.filedata ?? res?.fileData;
+      if (!b64) return null;
+      const data = Buffer.from(String(b64), "base64");
+      if (data.length === 0) return null;
+      const fileName = res?.fileName ? String(res.fileName) : "factuur.pdf";
+      return { fileName, contentType: "application/pdf", data };
+    } catch {
+      return null;
     }
   }
 

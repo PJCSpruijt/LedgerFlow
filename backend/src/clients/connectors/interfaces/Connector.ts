@@ -84,6 +84,16 @@ export interface OutstandingItem {
   /** Still-open amount. */
   openAmount: number;
   isDebtor: boolean;
+  /** Opaque, connector-specific reference for fetching the invoice PDF via
+   *  getInvoicePdf(). Null when no PDF is retrievable for this item. */
+  documentId: string | null;
+}
+
+/** A retrieved invoice document (PDF). */
+export interface InvoiceDocument {
+  fileName: string;
+  contentType: string;
+  data: Buffer;
 }
 
 export interface ConnectionTestResult {
@@ -106,4 +116,7 @@ export interface Connector {
 
   /** Open invoices for receivables (debtor) or payables (creditor), with amounts. */
   getOutstanding(kind: "debtor" | "creditor"): Promise<OutstandingItem[]>;
+
+  /** Fetch an invoice PDF by an OutstandingItem.documentId, or null if none. */
+  getInvoicePdf(ref: string): Promise<InvoiceDocument | null>;
 }

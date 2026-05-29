@@ -14,7 +14,7 @@ import { requireActiveSubscription } from "../middleware/subscription.js";
 import { getConnectorForEntity } from "../clients/connectors/registry.js";
 import { applyVatMappings } from "../services/vat-mapping.service.js";
 import { ConnectionKind } from "@prisma/client";
-import { BadRequestError } from "../utils/errors.js";
+import { BadRequestError, NotFoundError } from "../utils/errors.js";
 
 export const yukiRouter = Router();
 
@@ -199,6 +199,26 @@ yukiRouter.get(
     const { type } = req.query as unknown as { type: "debtor" | "creditor" };
     const connector = await getConnectorForEntity(requireEntity(req));
     res.json({ items: await connector.getOutstanding(type) });
+  }),
+);
+
+const PdfQuery = z.object({ ref: z.string().min(1) });
+
+yukiRouter.get(
+  "/invoice-pdf",
+  requireAuth,
+  requireScope,
+  requireActiveSubscription,
+  validateQuery(PdfQuery),
+  asyncHandler(async (req, res) => {
+    const { ref } = req.query as unknown as { ref: string };
+    const connector = await getConnectorForEntity(requireEntity(req));
+    const doc = await connector.getInvoicePdf(ref);
+    if (!doc) throw new NotFoundError("Geen factuur-PDF beschikbaar voor deze post");
+    res.setHeader("Content-Type", doc.contentType);
+    res.setHeader("Content-Disposition", `inline; filename="${doc.fileName.replace(/"/g, "")}"`);
+    res.setHeader("Content-Length", String(doc.data.byteLength));
+    res.end(doc.data);
   }),
 );
 
