@@ -298,7 +298,19 @@ function GroupBlock({
               {formatMoney(t.amount, t.currency || currency)}
             </td>
             <td className="py-1.5 px-3 whitespace-nowrap">{t.contactName ?? ""}</td>
-            <td className="py-1.5 px-3 whitespace-nowrap">{t.reference ?? ""}</td>
+            <td className="py-1.5 px-3 whitespace-nowrap">
+              {t.documentId ? (
+                <button
+                  className="lf-link"
+                  title="Bekijk factuur (PDF)"
+                  onClick={() => onOpenPdf(t.documentId!, t.reference ?? t.documentType ?? "factuur")}
+                >
+                  {t.reference ?? "factuur"}
+                </button>
+              ) : (
+                (t.reference ?? "")
+              )}
+            </td>
             <td className="py-1.5 px-3 whitespace-nowrap">
               {t.documentId ? (
                 <button

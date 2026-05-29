@@ -316,13 +316,15 @@ export class EboekhoudenConnector implements Connector {
           // (negative = credit), matching the Yuki connector.
           const headerAmount = Number(m.amount) || 0;
           const rowSign = headerAmount >= 0 ? -1 : 1;
-          // No transaction-level PDF link for e-Boekhouden: invoice PDFs live only
-          // in the Facturatie (billing) module, keyed by its OWN numbering
-          // (e.g. "F26001"). Booked sales mutations reference external invoice
-          // numbers (e.g. "2025-0030" from the webshop) that never match the
-          // billing module — verified live: 0/7 sales refs overlapped the billing
-          // list. Setting documentId here would only yield dead "no PDF" links.
-          const pdfRef: string | null = null;
+          // Sales invoices booked from the Facturatie (billing) module carry the
+          // billing invoice number as their reference (e.g. "F26022"), which
+          // resolves to a PDF via getInvoicePdf — same path as receivables. Set
+          // documentId for every Verkoopfactuur; getInvoicePdf returns null (the
+          // UI shows "geen PDF beschikbaar") for sales booked under external
+          // numbering that has no billing-module match. Purchase invoices have
+          // no PDF endpoint, so only sales get a link.
+          const invNo = det.invoiceNumber ?? m.invoiceNumber;
+          const pdfRef = documentType === "Verkoopfactuur" && invNo ? String(invNo) : null;
           out.push({
             date,
             year,
@@ -417,7 +419,8 @@ export class EboekhoudenConnector implements Connector {
         contactName: null,
         reference: m.invoiceNumber ? String(m.invoiceNumber) : null,
         documentType,
-        documentId: null, // see note above: no mutation→PDF link for e-Boekhouden
+        documentId:
+          documentType === "Verkoopfactuur" && m.invoiceNumber ? String(m.invoiceNumber) : null,
         project: null,
         description: documentType ?? "",
         currency: "EUR",
