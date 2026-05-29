@@ -3,6 +3,8 @@ import { DashboardPage } from "../pages/DashboardPage";
 import { YukiPage } from "../pages/YukiPage";
 import { ExportsPage } from "../pages/ExportsPage";
 import { VatMappingPage } from "../pages/VatMappingPage";
+import { TransactionsPage } from "../pages/TransactionsPage";
+import { GeneralLedgerPage } from "../pages/GeneralLedgerPage";
 import { BillingPage } from "../pages/BillingPage";
 import { SettingsPage } from "../pages/SettingsPage";
 import { AdminPage } from "../pages/AdminPage";
@@ -58,8 +60,8 @@ export const MODULES: ModuleDef[] = [
     subpages: [
       { path: "connectors", label: "Connectors", element: <YukiPage /> },
       { path: "entities", label: "Entities", element: soon("Entities") },
-      { path: "transactions", label: "Transactions", element: soon("Transactions") },
-      { path: "general-ledger", label: "General Ledger", element: soon("General Ledger") },
+      { path: "transactions", label: "Transactions", element: <TransactionsPage /> },
+      { path: "general-ledger", label: "General Ledger", element: <GeneralLedgerPage /> },
       { path: "receivables", label: "Receivables", element: soon("Receivables") },
       { path: "payables", label: "Payables", element: soon("Payables") },
       { path: "relations", label: "Relations", element: soon("Relations") },
