@@ -4,6 +4,7 @@ import { useAuth } from "../contexts/AuthContext";
 import { isAdminRole, useScope, VIEW_LABELS, type ViewType } from "../contexts/ScopeContext";
 import { api } from "../services/api";
 import { MODULES, type ModuleDef } from "../navigation/navConfig";
+import { useContextUrlSync } from "../navigation/useContextUrlSync";
 
 const VIEW_TYPES = Object.keys(VIEW_LABELS) as ViewType[];
 
@@ -36,6 +37,7 @@ export function AppShell() {
   const nav = useNavigate();
   const { pathname } = useLocation();
   const [adding, setAdding] = useState(false);
+  useContextUrlSync();
 
   const isPlatformAdmin = user?.platformRole === "PLATFORM_ADMIN";
   const modules = MODULES.filter((m) => !m.platformAdminOnly || isPlatformAdmin);
