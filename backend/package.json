@@ -15,6 +15,7 @@
     "prisma:deploy": "prisma migrate deploy",
     "prisma:studio": "prisma studio",
     "platform-admin": "tsx scripts/platform-admin.ts",
+    "reset-2fa": "tsx scripts/reset-2fa.ts",
     "test": "vitest run",
     "test:watch": "vitest",
     "lint": "echo 'no lint configured'"
