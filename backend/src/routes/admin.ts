@@ -1036,3 +1036,55 @@ adminRouter.delete(
     res.status(204).end();
   }),
 );
+
+const MoveEntitySchema = z.object({ targetGroupId: z.string().uuid() });
+
+/**
+ * Move an administration to another group (and thereby, possibly, another
+ * workspace). The connector/credentials, entity-level memberships and audit
+ * trail travel with the entity. Entity-scoped VAT mappings are re-pointed to the
+ * new workspace so they keep applying.
+ */
+adminRouter.patch(
+  "/entities/:id/move",
+  validateParams(IdParam),
+  validateBody(MoveEntitySchema),
+  asyncHandler(async (req, res) => {
+    const { id } = req.params as z.infer<typeof IdParam>;
+    const { targetGroupId } = req.body as z.infer<typeof MoveEntitySchema>;
+
+    const entity = await prisma.entity.findUnique({ where: { id }, include: { group: true } });
+    if (!entity) throw new NotFoundError("Administratie niet gevonden");
+    const target = await prisma.group.findUnique({ where: { id: targetGroupId } });
+    if (!target) throw new NotFoundError("Doelgroep niet gevonden");
+
+    if (target.id === entity.groupId) {
+      res.json({ entity: { id: entity.id, name: entity.name, groupId: entity.groupId } });
+      return;
+    }
+
+    const fromWorkspaceId = entity.group.workspaceId;
+    const toWorkspaceId = target.workspaceId;
+
+    await prisma.$transaction(async (tx) => {
+      await tx.entity.update({ where: { id }, data: { groupId: targetGroupId } });
+      if (toWorkspaceId !== fromWorkspaceId) {
+        // Keep entity-scoped VAT mappings valid under the new workspace.
+        await tx.vatMapping.updateMany({
+          where: { entityId: id },
+          data: { workspaceId: toWorkspaceId },
+        });
+      }
+      await tx.auditLog.create({
+        data: {
+          workspaceId: toWorkspaceId,
+          userId: req.user!.id,
+          action: "admin.entity.moved",
+          metadata: { entityId: id, fromWorkspaceId, toWorkspaceId, toGroupId: targetGroupId },
+        },
+      });
+    });
+
+    res.json({ entity: { id: entity.id, name: entity.name, groupId: targetGroupId } });
+  }),
+);
