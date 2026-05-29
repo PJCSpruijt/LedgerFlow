@@ -11,6 +11,7 @@ import { BillingPage } from "./pages/BillingPage";
 import { YukiPage } from "./pages/YukiPage";
 import { ExportsPage } from "./pages/ExportsPage";
 import { AdminPage } from "./pages/AdminPage";
+import { AdminPlansPage } from "./pages/AdminPlansPage";
 
 function RequireAuth({ children }: { children: ReactElement }) {
   const { user, loading } = useAuth();
@@ -61,6 +62,14 @@ export function App() {
           element={
             <RequirePlatformAdmin>
               <AdminPage />
+            </RequirePlatformAdmin>
+          }
+        />
+        <Route
+          path="/admin/plans"
+          element={
+            <RequirePlatformAdmin>
+              <AdminPlansPage />
             </RequirePlatformAdmin>
           }
         />

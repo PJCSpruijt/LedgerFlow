@@ -4,7 +4,8 @@ import { prisma } from "../config/prisma.js";
 import { asyncHandler } from "../middleware/asyncHandler.js";
 import { validateQuery } from "../middleware/validate.js";
 import { requireAuth, requireScope, isPlatformAdmin } from "../middleware/auth.js";
-import { requireActiveSubscription } from "../middleware/subscription.js";
+import { requireModule } from "../middleware/subscription.js";
+import { getWorkspaceEntitlements } from "../services/plan.service.js";
 import { getConnectorForEntity } from "../clients/connectors/registry.js";
 import {
   buildTransactionsWorkbook,
@@ -13,7 +14,7 @@ import {
   type TransactionExportRow,
   type TrialBalanceExportRow,
 } from "../services/export.service.js";
-import { ForbiddenError } from "../utils/errors.js";
+import { ForbiddenError, ModuleRequiredError } from "../utils/errors.js";
 
 export const exportRouter = Router();
 
@@ -110,6 +111,27 @@ function scopeLabel(entities: ResolvedEntity[], wholeWorkspace: boolean): string
   return `${entities.length} administraties`;
 }
 
+/**
+ * Combining more than one administration in a single export is gated behind the
+ * MULTI_ADMIN module. The platform superuser is exempt. Run after the entity
+ * list has been resolved.
+ */
+async function assertMultiAdminAllowed(
+  req: import("express").Request,
+  workspaceId: string,
+  entityCount: number,
+): Promise<void> {
+  if (entityCount <= 1) return;
+  if (isPlatformAdmin(req)) return;
+  const ent = await getWorkspaceEntitlements(workspaceId);
+  if (!ent.modules.includes("MULTI_ADMIN")) {
+    throw new ModuleRequiredError(
+      "Het combineren van meerdere administraties in één export vereist de module Multi-administratie. Upgrade je abonnement.",
+      { module: "MULTI_ADMIN" },
+    );
+  }
+}
+
 function sendXlsx(res: import("express").Response, buf: Buffer, filename: string): void {
   res.setHeader(
     "Content-Type",
@@ -124,13 +146,14 @@ exportRouter.get(
   "/trial-balance.xlsx",
   requireAuth,
   requireScope,
-  requireActiveSubscription,
+  requireModule("EXPORTS"),
   validateQuery(ExportQuery),
   asyncHandler(async (req, res) => {
     const query = req.query as unknown as ExportQueryInput;
     const requestedIds = parseEntityIds(query.entityIds);
     const workspaceId = req.scope!.workspaceId;
     const entities = await resolveAuthorizedEntities(req, workspaceId, requestedIds);
+    await assertMultiAdminAllowed(req, workspaceId, entities.length);
     const range = { from: query.from, to: query.to };
 
     const rows: TrialBalanceExportRow[] = [];
@@ -173,13 +196,14 @@ exportRouter.get(
   "/transactions.xlsx",
   requireAuth,
   requireScope,
-  requireActiveSubscription,
+  requireModule("EXPORTS"),
   validateQuery(ExportQuery),
   asyncHandler(async (req, res) => {
     const query = req.query as unknown as ExportQueryInput;
     const requestedIds = parseEntityIds(query.entityIds);
     const workspaceId = req.scope!.workspaceId;
     const entities = await resolveAuthorizedEntities(req, workspaceId, requestedIds);
+    await assertMultiAdminAllowed(req, workspaceId, entities.length);
     const range = { from: query.from, to: query.to };
 
     const rows: TransactionExportRow[] = [];

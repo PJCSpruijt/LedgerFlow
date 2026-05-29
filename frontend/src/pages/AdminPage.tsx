@@ -21,15 +21,40 @@ interface AdminGroup {
   name: string;
   entities: AdminEntity[];
 }
+interface WorkspaceSubscription {
+  status: string;
+  validUntil: string | null;
+  planId: string | null;
+  planKey: string | null;
+  planName: string | null;
+}
 interface AdminWorkspace {
   id: string;
   name: string;
   type: string;
   createdAt: string;
   memberCount: number;
-  subscription: { plan: string | null; status: string; validUntil: string | null } | null;
+  subscription: WorkspaceSubscription | null;
   groups: AdminGroup[];
 }
+interface AdminPlan {
+  id: string;
+  key: string;
+  name: string;
+  active: boolean;
+}
+
+const STATUSES = [
+  "NONE",
+  "TRIALING",
+  "ACTIVE",
+  "PAST_DUE",
+  "CANCELED",
+  "UNPAID",
+  "INCOMPLETE",
+  "INCOMPLETE_EXPIRED",
+  "PAUSED",
+];
 
 const fmtDate = (s: string | null) => (s ? new Date(s).toLocaleDateString("nl-NL") : "—");
 const fmtDateTime = (s: string | null) => (s ? new Date(s).toLocaleString("nl-NL") : "—");
@@ -43,21 +68,118 @@ function StatCard({ label, value }: { label: string; value: number | string }) {
   );
 }
 
+function SubscriptionEditor({
+  workspace,
+  plans,
+  onSaved,
+}: {
+  workspace: AdminWorkspace;
+  plans: AdminPlan[];
+  onSaved: () => void | Promise<void>;
+}) {
+  const sub = workspace.subscription;
+  const [planId, setPlanId] = useState<string>(sub?.planId ?? "");
+  const [status, setStatus] = useState<string>(sub?.status ?? "NONE");
+  const [validUntil, setValidUntil] = useState<string>(
+    sub?.validUntil ? sub.validUntil.slice(0, 10) : "",
+  );
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [ok, setOk] = useState(false);
+
+  const save = async () => {
+    setErr(null);
+    setOk(false);
+    setBusy(true);
+    try {
+      await api(`/api/admin/workspaces/${workspace.id}/subscription`, {
+        method: "PATCH",
+        body: {
+          planId: planId || null,
+          status,
+          validUntil: validUntil ? new Date(validUntil).toISOString() : null,
+        },
+      });
+      setOk(true);
+      await onSaved();
+    } catch (e) {
+      setErr(e instanceof ApiError ? e.message : "Opslaan mislukt");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="mt-3 rounded-md bg-slate-50 border border-slate-200 p-3">
+      <div className="text-xs font-medium text-slate-500 mb-2">Abonnement toewijzen</div>
+      <div className="flex flex-wrap items-end gap-3">
+        <label className="block">
+          <span className="text-[10px] uppercase tracking-wide text-slate-400">Plan</span>
+          <select className="lf-input text-xs" value={planId} onChange={(e) => setPlanId(e.target.value)}>
+            <option value="">Geen plan</option>
+            {plans.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name}
+                {p.active ? "" : " (inactief)"}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="block">
+          <span className="text-[10px] uppercase tracking-wide text-slate-400">Status</span>
+          <select
+            className="lf-input text-xs"
+            value={status}
+            onChange={(e) => setStatus(e.target.value)}
+          >
+            {STATUSES.map((s) => (
+              <option key={s} value={s}>
+                {s}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="block">
+          <span className="text-[10px] uppercase tracking-wide text-slate-400">Geldig tot</span>
+          <input
+            type="date"
+            className="lf-input text-xs"
+            value={validUntil}
+            onChange={(e) => setValidUntil(e.target.value)}
+          />
+        </label>
+        <button className="lf-btn-primary text-xs" onClick={save} disabled={busy}>
+          {busy ? "Opslaan…" : "Opslaan"}
+        </button>
+        {ok && <span className="text-xs text-emerald-600">Opgeslagen</span>}
+        {err && <span className="text-xs text-red-600">{err}</span>}
+      </div>
+    </div>
+  );
+}
+
 export function AdminPage() {
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [workspaces, setWorkspaces] = useState<AdminWorkspace[]>([]);
+  const [plans, setPlans] = useState<AdminPlan[]>([]);
   const [err, setErr] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+
+  const loadWorkspaces = async () => {
+    const w = await api<{ workspaces: AdminWorkspace[] }>("/api/admin/workspaces");
+    setWorkspaces(w.workspaces);
+  };
 
   useEffect(() => {
     void (async () => {
       try {
-        const [u, w] = await Promise.all([
+        const [u, , p] = await Promise.all([
           api<{ users: AdminUser[] }>("/api/admin/users"),
-          api<{ workspaces: AdminWorkspace[] }>("/api/admin/workspaces"),
+          loadWorkspaces(),
+          api<{ plans: AdminPlan[] }>("/api/admin/plans"),
         ]);
         setUsers(u.users);
-        setWorkspaces(w.workspaces);
+        setPlans(p.plans);
       } catch (e) {
         setErr(e instanceof ApiError ? e.message : "Kon beheergegevens niet laden");
       } finally {
@@ -146,13 +268,18 @@ export function AdminPage() {
                 <div className="text-xs">
                   {ws.subscription ? (
                     <span className="text-slate-600">
-                      {ws.subscription.plan ?? "Geen plan"} — {ws.subscription.status}
+                      {ws.subscription.planName ?? "Geen plan"} — {ws.subscription.status}
+                      {ws.subscription.validUntil
+                        ? ` (tot ${fmtDate(ws.subscription.validUntil)})`
+                        : ""}
                     </span>
                   ) : (
                     <span className="text-slate-400">Geen abonnement</span>
                   )}
                 </div>
               </div>
+
+              <SubscriptionEditor workspace={ws} plans={plans} onSaved={loadWorkspaces} />
 
               <div className="mt-3 space-y-3">
                 {ws.groups.map((g) => (

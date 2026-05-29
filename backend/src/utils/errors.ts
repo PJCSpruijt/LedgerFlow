@@ -53,6 +53,17 @@ export class SubscriptionRequiredError extends AppError {
   }
 }
 
+/**
+ * The workspace has an active subscription, but its plan does not include the
+ * module the requested feature needs. Distinct from SubscriptionRequiredError
+ * (no active plan at all) so the UI can prompt an upgrade rather than a purchase.
+ */
+export class ModuleRequiredError extends AppError {
+  constructor(message = "Your plan does not include this feature", details?: unknown) {
+    super(403, "MODULE_REQUIRED", message, details);
+  }
+}
+
 export class ConnectorError extends AppError {
   constructor(message = "Connector error", details?: unknown) {
     super(502, "CONNECTOR_ERROR", message, details);

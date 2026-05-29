@@ -9,6 +9,7 @@ import { asyncHandler } from "../middleware/asyncHandler.js";
 import { validateBody } from "../middleware/validate.js";
 import { requireAuth, requireScope, requireScopeRole } from "../middleware/auth.js";
 import { mapStripeStatus } from "../services/subscription.service.js";
+import { moduleLabels } from "../config/modules.js";
 import { BadRequestError, NotFoundError } from "../utils/errors.js";
 
 export const billingRouter = Router();
@@ -57,6 +58,35 @@ billingRouter.post(
   }),
 );
 
+/**
+ * The publicly-offered plan catalog (active plans only), for the Billing page.
+ * `features` are the human labels of the plan's modules; `checkoutAvailable`
+ * marks plans that can be purchased through Stripe (the seeded enum plans).
+ */
+billingRouter.get(
+  "/plans",
+  requireAuth,
+  asyncHandler(async (_req, res) => {
+    const plans = await prisma.plan.findMany({
+      where: { active: true },
+      orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
+    });
+    res.json({
+      plans: plans.map((p) => ({
+        key: p.key,
+        name: p.name,
+        description: p.description,
+        priceCents: p.priceCents,
+        currency: p.currency,
+        interval: p.interval,
+        modules: p.modules,
+        features: moduleLabels(p.modules),
+        checkoutAvailable: p.key in SubscriptionPlan,
+      })),
+    });
+  }),
+);
+
 /** Return the current subscription status for the active workspace. */
 billingRouter.get(
   "/subscription",
@@ -65,11 +95,15 @@ billingRouter.get(
   asyncHandler(async (req, res) => {
     const sub = await prisma.subscription.findUnique({
       where: { workspaceId: req.scope!.workspaceId },
+      include: { planRef: true },
     });
     res.json({
       subscription: sub
         ? {
             plan: sub.plan,
+            planKey: sub.planRef?.key ?? sub.plan ?? null,
+            planName: sub.planRef?.name ?? sub.plan ?? null,
+            modules: sub.planRef?.modules ?? [],
             status: sub.status,
             validUntil: sub.validUntil,
           }
@@ -166,6 +200,9 @@ async function upsertSubscription(
   const priceId = item?.price.id;
   const plan = planFromPriceId(priceId);
   const status = mapStripeStatus(sub.status);
+  // Keep the managed-plan link in sync with the legacy enum so entitlements
+  // resolve identically for Stripe- and manually-activated subscriptions.
+  const planRow = plan ? await prisma.plan.findUnique({ where: { key: plan } }) : null;
 
   // current_period_end moved from Subscription → SubscriptionItem in recent Stripe
   // API versions. Read from item first, fall back to subscription for older API
@@ -182,6 +219,7 @@ async function upsertSubscription(
       stripeCustomerId: customerId,
       stripeSubscriptionId: sub.id,
       plan,
+      planId: planRow?.id ?? null,
       status,
       validUntil,
     },
@@ -189,6 +227,7 @@ async function upsertSubscription(
       stripeCustomerId: customerId ?? undefined,
       stripeSubscriptionId: sub.id,
       plan: plan ?? undefined,
+      planId: planRow?.id ?? undefined,
       status,
       validUntil,
     },

@@ -152,20 +152,54 @@ enum SubscriptionStatus {
   NONE
 }
 
+enum BillingInterval {
+  MONTH
+  YEAR
+}
+
+// The plan catalog, managed by platform admins. Pricing and the set of feature
+// modules a plan grants live here (the module KEYS are code-defined in
+// src/config/modules.ts). `key` is a stable machine identifier; for the three
+// seeded plans it matches the legacy SubscriptionPlan enum so Stripe price
+// mapping keeps working.
+model Plan {
+  id            String          @id @default(uuid())
+  key           String          @unique
+  name          String
+  description   String?
+  priceCents    Int             @default(0)
+  currency      String          @default("EUR")
+  interval      BillingInterval @default(MONTH)
+  modules       String[]        @default([])
+  stripePriceId String?
+  active        Boolean         @default(true)
+  sortOrder     Int             @default(0)
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+
+  subscriptions Subscription[]
+}
+
 model Subscription {
   id                    String             @id @default(uuid())
   workspaceId           String             @unique
   stripeCustomerId      String?
   stripeSubscriptionId  String?            @unique
+  // Legacy enum kept for backward compat with the Stripe price mapping; `planId`
+  // is the authoritative link to the managed plan catalog. A manual (non-Stripe)
+  // assignment sets planId directly.
   plan                  SubscriptionPlan?
+  planId                String?
   status                SubscriptionStatus @default(NONE)
   validUntil            DateTime?
   createdAt             DateTime           @default(now())
   updatedAt             DateTime           @updatedAt
 
   workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  planRef   Plan?     @relation(fields: [planId], references: [id], onDelete: SetNull)
 
   @@index([stripeCustomerId])
+  @@index([planId])
 }
 
 enum YukiEnvironment {

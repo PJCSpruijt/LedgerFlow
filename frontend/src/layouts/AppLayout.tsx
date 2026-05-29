@@ -12,7 +12,10 @@ const navItems = [
   { to: "/settings", label: "Instellingen" },
 ];
 
-const adminNavItem = { to: "/admin", label: "Beheer" };
+const adminNavItems = [
+  { to: "/admin", label: "Beheer" },
+  { to: "/admin/plans", label: "Abonnementen" },
+];
 
 export function AppLayout() {
   const { user, logout } = useAuth();
@@ -47,7 +50,7 @@ export function AppLayout() {
           <div className="text-xs text-slate-500">Finance workflows</div>
         </div>
         <nav className="flex-1 px-3 py-4 space-y-1">
-          {(user?.platformRole === "PLATFORM_ADMIN" ? [...navItems, adminNavItem] : navItems).map((item) => (
+          {(user?.platformRole === "PLATFORM_ADMIN" ? [...navItems, ...adminNavItems] : navItems).map((item) => (
             <NavLink
               key={item.to}
               to={item.to}
