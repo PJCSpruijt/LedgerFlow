@@ -18,9 +18,19 @@ export const billingRouter = Router();
 /*  Checkout                                                                  */
 /* -------------------------------------------------------------------------- */
 
+// Accept any plan key from the managed catalog (not just the legacy enum).
 const CheckoutSchema = z.object({
-  plan: z.nativeEnum(SubscriptionPlan),
+  plan: z.string().min(1),
 });
+
+/** Resolve the Stripe price-id for a plan: the catalog's stripePriceId wins, with
+ * the STRIPE_PRICE_<KEY> env var as fallback (ignoring unconfigured placeholders). */
+function resolvePriceId(planKey: string, catalogPriceId: string | null): string | null {
+  if (catalogPriceId && catalogPriceId.trim()) return catalogPriceId.trim();
+  const envPrice = (STRIPE_PRICE_IDS as Record<string, string | undefined>)[planKey];
+  if (envPrice && !envPrice.endsWith("_placeholder")) return envPrice;
+  return null;
+}
 
 billingRouter.post(
   "/create-checkout-session",
@@ -30,11 +40,15 @@ billingRouter.post(
   validateBody(CheckoutSchema),
   asyncHandler(async (req, res) => {
     const workspaceId = req.scope!.workspaceId;
-    const plan = req.body.plan as SubscriptionPlan;
-    const priceId = STRIPE_PRICE_IDS[plan];
-    if (!priceId || priceId.endsWith("_placeholder")) {
+    const planKey = req.body.plan as string;
+
+    const planRow = await prisma.plan.findUnique({ where: { key: planKey } });
+    if (!planRow || !planRow.active) throw new BadRequestError("Onbekend of inactief plan");
+
+    const priceId = resolvePriceId(planKey, planRow.stripePriceId);
+    if (!priceId) {
       throw new BadRequestError(
-        `Stripe price ID for ${plan} not configured. Set STRIPE_PRICE_${plan} in env.`,
+        `Geen Stripe price-ID geconfigureerd voor plan ${planKey}. Stel die in op de Abonnementen-pagina.`,
       );
     }
 
@@ -50,7 +64,7 @@ billingRouter.post(
       customer: sub.stripeCustomerId ?? undefined,
       customer_email: sub.stripeCustomerId ? undefined : req.user!.email,
       client_reference_id: workspaceId,
-      metadata: { workspaceId, plan },
+      metadata: { workspaceId, plan: planKey },
       subscription_data: { metadata: { workspaceId } },
     });
 
@@ -198,11 +212,17 @@ async function upsertSubscription(
 ): Promise<void> {
   const item = sub.items.data[0];
   const priceId = item?.price.id;
-  const plan = planFromPriceId(priceId);
   const status = mapStripeStatus(sub.status);
-  // Keep the managed-plan link in sync with the legacy enum so entitlements
-  // resolve identically for Stripe- and manually-activated subscriptions.
-  const planRow = plan ? await prisma.plan.findUnique({ where: { key: plan } }) : null;
+  // Resolve the managed plan: match the price-id against the catalog first (covers
+  // prices configured per-plan), then fall back to the env-based enum mapping.
+  const enumFromPrice = planFromPriceId(priceId);
+  const planRow =
+    (priceId ? await prisma.plan.findFirst({ where: { stripePriceId: priceId } }) : null) ??
+    (enumFromPrice ? await prisma.plan.findUnique({ where: { key: enumFromPrice } }) : null);
+  // Legacy enum column: keep it set when the plan key is a known enum value.
+  const plan =
+    enumFromPrice ??
+    (planRow && planRow.key in SubscriptionPlan ? (planRow.key as SubscriptionPlan) : null);
 
   // current_period_end moved from Subscription → SubscriptionItem in recent Stripe
   // API versions. Read from item first, fall back to subscription for older API
