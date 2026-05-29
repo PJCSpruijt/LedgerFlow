@@ -21,6 +21,7 @@ import { Placeholder } from "../pages/Placeholder";
  * module sidebar and the per-module sub-navigation are all generated from this.
  * Real pages are wired where they exist; everything else is a scaffold so the
  * information architecture is complete and future modules slot in cleanly.
+ * UI labels are Dutch throughout; route paths stay English (stable URLs).
  */
 export interface SubPage {
   path: string;
@@ -36,6 +37,10 @@ export interface ModuleDef {
   /** Emoji icon placeholder until a proper icon set is wired. */
   icon: string;
   platformAdminOnly?: boolean;
+  /** Hidden from the main sidebar (reached via the user menu instead). */
+  hideFromSidebar?: boolean;
+  /** Pinned to the bottom of the sidebar (e.g. Platform Admin). */
+  pinBottom?: boolean;
   subpages: SubPage[];
 }
 
@@ -48,115 +53,121 @@ export const MODULES: ModuleDef[] = [
     basePath: "/dashboard",
     icon: "🏠",
     subpages: [
-      { path: "overview", label: "Overview", element: <DashboardPage /> },
-      { path: "sync-status", label: "Sync Status", element: soon("Sync Status") },
-      { path: "data-quality", label: "Data Quality", element: soon("Data Quality") },
-      { path: "tasks", label: "Tasks & Warnings", element: soon("Tasks & Warnings") },
-      { path: "activity", label: "Recent Activity", element: soon("Recent Activity") },
+      { path: "overview", label: "Overzicht", element: <DashboardPage /> },
+      { path: "sync-status", label: "Synchronisatiestatus", element: soon("Synchronisatiestatus") },
+      { path: "data-quality", label: "Datakwaliteit", element: soon("Datakwaliteit") },
+      { path: "tasks", label: "Taken & waarschuwingen", element: soon("Taken & waarschuwingen") },
+      { path: "activity", label: "Recente activiteit", element: soon("Recente activiteit") },
     ],
   },
   {
     key: "data",
-    label: "Data",
+    label: "Gegevens",
     basePath: "/data",
     icon: "🗄️",
     subpages: [
-      { path: "connectors", label: "Connectors", element: <YukiPage /> },
-      { path: "entities", label: "Entities", element: soon("Entities") },
-      { path: "transactions", label: "Transactions", element: <TransactionsPage /> },
-      { path: "general-ledger", label: "General Ledger", element: <GeneralLedgerPage /> },
-      { path: "receivables", label: "Receivables", element: <OutstandingView kind="debtor" /> },
-      { path: "payables", label: "Payables", element: <OutstandingView kind="creditor" /> },
-      { path: "relations", label: "Relations", element: <RelationsView mode="all" /> },
-      { path: "source-documents", label: "Source Documents", element: soon("Source Documents") },
-      { path: "sync-history", label: "Sync History", element: soon("Sync History") },
-      { path: "raw-explorer", label: "Raw Data Explorer", element: soon("Raw Data Explorer") },
+      { path: "connectors", label: "Koppelingen", element: <YukiPage /> },
+      { path: "entities", label: "Administraties", element: soon("Administraties") },
+      { path: "transactions", label: "Transacties", element: <TransactionsPage /> },
+      { path: "general-ledger", label: "Grootboek", element: <GeneralLedgerPage /> },
+      { path: "receivables", label: "Debiteuren", element: <OutstandingView kind="debtor" /> },
+      { path: "payables", label: "Crediteuren", element: <OutstandingView kind="creditor" /> },
+      { path: "relations", label: "Relaties", element: <RelationsView mode="all" /> },
+      { path: "source-documents", label: "Brondocumenten", element: soon("Brondocumenten") },
+      { path: "sync-history", label: "Synchronisatiegeschiedenis", element: soon("Synchronisatiegeschiedenis") },
+      { path: "raw-explorer", label: "Ruwe data", element: soon("Ruwe data") },
     ],
   },
   {
     key: "mappings",
-    label: "Mappings",
+    label: "Toewijzingen",
     basePath: "/mappings",
     icon: "🔀",
     subpages: [
-      { path: "account-tax", label: "Account & Tax Mappings", element: <VatMappingPage /> },
-      { path: "universal-coa", label: "Universal Chart of Accounts", element: soon("Universal Chart of Accounts") },
-      { path: "relations", label: "Relation Mappings", element: soon("Relation Mappings") },
-      { path: "cashflow", label: "Cashflow Mappings", element: soon("Cashflow Mappings") },
-      { path: "reporting-structures", label: "Reporting Structures", element: soon("Reporting Structures") },
-      { path: "templates", label: "Default Templates", element: soon("Default Templates") },
-      { path: "overrides", label: "Entity Overrides", element: soon("Entity Overrides") },
-      { path: "import-export", label: "Import / Export", element: soon("Import / Export") },
-      { path: "audit", label: "Mapping Audit Trail", element: soon("Mapping Audit Trail") },
+      { path: "account-tax", label: "Grootboek & btw", element: <VatMappingPage /> },
+      { path: "universal-coa", label: "Universeel rekeningschema", element: soon("Universeel rekeningschema") },
+      { path: "relations", label: "Relatiekoppelingen", element: soon("Relatiekoppelingen") },
+      { path: "cashflow", label: "Kasstroomkoppelingen", element: soon("Kasstroomkoppelingen") },
+      { path: "reporting-structures", label: "Rapportagestructuren", element: soon("Rapportagestructuren") },
+      { path: "templates", label: "Standaardsjablonen", element: soon("Standaardsjablonen") },
+      { path: "overrides", label: "Administratie-uitzonderingen", element: soon("Administratie-uitzonderingen") },
+      { path: "import-export", label: "Import / export", element: soon("Import / export") },
+      { path: "audit", label: "Wijzigingslog", element: soon("Wijzigingslog") },
     ],
   },
   {
     key: "consolidation",
-    label: "Consolidation",
+    label: "Consolidatie",
     basePath: "/consolidation",
     icon: "🧮",
     subpages: [
-      { path: "runs", label: "Consolidation Runs", element: soon("Consolidation Runs") },
-      { path: "trial-balance", label: "Consolidated Trial Balance", element: soon("Consolidated Trial Balance") },
-      { path: "pnl", label: "Consolidated P&L", element: soon("Consolidated P&L") },
-      { path: "balance-sheet", label: "Consolidated Balance Sheet", element: soon("Consolidated Balance Sheet") },
-      { path: "intercompany", label: "Intercompany Matching", element: soon("Intercompany Matching") },
-      { path: "elimination-rules", label: "Elimination Rules", element: soon("Elimination Rules") },
-      { path: "elimination-entries", label: "Elimination Entries", element: soon("Elimination Entries") },
-      { path: "adjustments", label: "Consolidation Adjustments", element: soon("Consolidation Adjustments") },
-      { path: "currency-translation", label: "Currency Translation", element: soon("Currency Translation") },
-      { path: "audit", label: "Consolidation Audit", element: soon("Consolidation Audit") },
+      { path: "runs", label: "Consolidatieruns", element: soon("Consolidatieruns") },
+      { path: "trial-balance", label: "Geconsolideerde proefbalans", element: soon("Geconsolideerde proefbalans") },
+      { path: "pnl", label: "Geconsolideerde W&V", element: soon("Geconsolideerde W&V") },
+      { path: "balance-sheet", label: "Geconsolideerde balans", element: soon("Geconsolideerde balans") },
+      { path: "intercompany", label: "Intercompany-matching", element: soon("Intercompany-matching") },
+      { path: "elimination-rules", label: "Eliminatieregels", element: soon("Eliminatieregels") },
+      { path: "elimination-entries", label: "Eliminatieboekingen", element: soon("Eliminatieboekingen") },
+      { path: "adjustments", label: "Consolidatiecorrecties", element: soon("Consolidatiecorrecties") },
+      { path: "currency-translation", label: "Valutaomrekening", element: soon("Valutaomrekening") },
+      { path: "audit", label: "Consolidatie-audit", element: soon("Consolidatie-audit") },
     ],
   },
   {
     key: "reporting",
-    label: "Reporting",
+    label: "Rapportage",
     basePath: "/reporting",
     icon: "📊",
     subpages: [
       { path: "downloads", label: "Downloads", element: <ExportsPage /> },
-      { path: "financial-statements", label: "Financial Statements", element: <FinancialStatementsPage /> },
-      { path: "management", label: "Management Reports", element: soon("Management Reports") },
-      { path: "cashflow", label: "Cashflow", element: soon("Cashflow") },
-      { path: "kpi", label: "KPI Dashboards", element: soon("KPI Dashboards") },
-      { path: "aging", label: "Aging Analysis", element: soon("Aging Analysis") },
-      { path: "intercompany", label: "Intercompany Reports", element: soon("Intercompany Reports") },
-      { path: "audit", label: "Audit Reports", element: soon("Audit Reports") },
-      { path: "scheduled", label: "Scheduled Exports", element: soon("Scheduled Exports") },
-      { path: "api", label: "API Access", element: soon("API Access") },
+      { path: "financial-statements", label: "Jaarrekening", element: <FinancialStatementsPage /> },
+      { path: "management", label: "Managementrapportages", element: soon("Managementrapportages") },
+      { path: "cashflow", label: "Kasstroom", element: soon("Kasstroom") },
+      { path: "kpi", label: "KPI-dashboards", element: soon("KPI-dashboards") },
+      { path: "aging", label: "Ouderdomsanalyse", element: soon("Ouderdomsanalyse") },
+      { path: "intercompany", label: "Intercompany-rapportages", element: soon("Intercompany-rapportages") },
+      { path: "audit", label: "Auditrapportages", element: soon("Auditrapportages") },
+      { path: "scheduled", label: "Geplande exports", element: soon("Geplande exports") },
+      { path: "api", label: "API-toegang", element: soon("API-toegang") },
     ],
   },
   {
+    // Reached via the user menu ("Instellingen"), not the module sidebar.
     key: "administration",
-    label: "Administration",
+    label: "Instellingen",
     basePath: "/administration",
     icon: "⚙️",
+    hideFromSidebar: true,
     subpages: [
-      { path: "settings", label: "Settings", element: <SettingsPage /> },
-      { path: "billing", label: "Billing & Subscription", element: <BillingPage /> },
-      { path: "notifications", label: "Notifications", element: soon("Notifications") },
-      { path: "security", label: "Security", element: soon("Security") },
+      { path: "settings", label: "Algemeen", element: <SettingsPage /> },
+      { path: "billing", label: "Facturatie & abonnement", element: <BillingPage /> },
+      { path: "notifications", label: "Meldingen", element: soon("Meldingen") },
+      { path: "security", label: "Beveiliging", element: soon("Beveiliging") },
     ],
   },
   {
     key: "platform",
-    label: "Platform Admin",
+    label: "Platformbeheer",
     basePath: "/platform",
     icon: "🛡️",
     platformAdminOnly: true,
+    pinBottom: true,
     subpages: [
-      { path: "overview", label: "Workspaces & Tenants", element: <AdminPage /> },
-      { path: "users", label: "Global Users", element: <AdminUsersPage /> },
-      { path: "plans", label: "Plans & Licensing", element: <AdminPlansPage /> },
-      { path: "usage", label: "Statistics & API Usage", element: <AdminStatsPage /> },
-      { path: "connector-registry", label: "Connector Registry", element: soon("Connector Registry") },
-      { path: "connector-health", label: "Connector Health", element: soon("Connector Health") },
-      { path: "jobs", label: "Background Jobs", element: soon("Background Jobs") },
-      { path: "feature-flags", label: "Feature Flags", element: soon("Feature Flags") },
-      { path: "system-logs", label: "System Logs", element: soon("System Logs") },
+      { path: "overview", label: "Werkruimtes & tenants", element: <AdminPage /> },
+      { path: "users", label: "Gebruikers", element: <AdminUsersPage /> },
+      { path: "plans", label: "Plannen & licenties", element: <AdminPlansPage /> },
+      { path: "usage", label: "Statistieken & API-gebruik", element: <AdminStatsPage /> },
+      { path: "connector-registry", label: "Connector-register", element: soon("Connector-register") },
+      { path: "connector-health", label: "Connector-status", element: soon("Connector-status") },
+      { path: "jobs", label: "Achtergrondtaken", element: soon("Achtergrondtaken") },
+      { path: "feature-flags", label: "Feature-flags", element: soon("Feature-flags") },
+      { path: "system-logs", label: "Systeemlogs", element: soon("Systeemlogs") },
     ],
   },
 ];
+
+/** The settings module, reached via the user menu. */
+export const SETTINGS_MODULE = MODULES.find((m) => m.key === "administration")!;
 
 /** Legacy → new path redirects so existing links/bookmarks keep working. */
 export const LEGACY_REDIRECTS: Record<string, string> = {

@@ -5,6 +5,8 @@ import { isAdminRole, useScope, VIEW_LABELS, type ViewType } from "../contexts/S
 import { api } from "../services/api";
 import { MODULES, type ModuleDef } from "../navigation/navConfig";
 import { useContextUrlSync } from "../navigation/useContextUrlSync";
+import { UserMenu } from "../components/UserMenu";
+import { DateRangePicker } from "../components/DateRangePicker";
 
 const VIEW_TYPES = Object.keys(VIEW_LABELS) as ViewType[];
 
@@ -17,7 +19,7 @@ const VIEW_TYPES = Object.keys(VIEW_LABELS) as ViewType[];
  * The right-side detail drawer host is added in a later step.
  */
 export function AppShell() {
-  const { user, logout } = useAuth();
+  const { user } = useAuth();
   const {
     workspaces,
     workspace,
@@ -41,10 +43,15 @@ export function AppShell() {
   useContextUrlSync();
 
   const isPlatformAdmin = user?.platformRole === "PLATFORM_ADMIN";
-  const modules = MODULES.filter((m) => !m.platformAdminOnly || isPlatformAdmin);
+  // Modules the user may reach (for routing + sub-nav), incl. hidden ones.
+  const accessibleModules = MODULES.filter((m) => !m.platformAdminOnly || isPlatformAdmin);
+  // Sidebar split: regular modules at the top, pinned ones (Platform Admin) at
+  // the bottom; modules flagged hideFromSidebar (Instellingen) live in the user menu.
+  const sidebarTop = accessibleModules.filter((m) => !m.hideFromSidebar && !m.pinBottom);
+  const sidebarBottom = accessibleModules.filter((m) => !m.hideFromSidebar && m.pinBottom);
   const activeModule: ModuleDef | undefined =
-    modules.find((m) => pathname === m.basePath || pathname.startsWith(m.basePath + "/")) ??
-    modules.find((m) => pathname.startsWith(m.basePath));
+    accessibleModules.find((m) => pathname === m.basePath || pathname.startsWith(m.basePath + "/")) ??
+    accessibleModules.find((m) => pathname.startsWith(m.basePath));
 
   const canAddEntity = isAdminRole(group?.role ?? workspace?.role);
   const addAdministration = async () => {
@@ -125,23 +132,7 @@ export function AppShell() {
         )}
 
         <div className="ml-auto flex items-center gap-2">
-          <div className="flex items-center gap-1" title="Periode (van / tot)">
-            <input
-              type="date"
-              className="lf-input text-xs h-9 py-0 w-36"
-              value={dateFrom}
-              max={dateTo}
-              onChange={(e) => setDateRange(e.target.value, dateTo)}
-            />
-            <span className="text-slate-400 text-xs">—</span>
-            <input
-              type="date"
-              className="lf-input text-xs h-9 py-0 w-36"
-              value={dateTo}
-              min={dateFrom}
-              onChange={(e) => setDateRange(dateFrom, e.target.value)}
-            />
-          </div>
+          <DateRangePicker value={{ from: dateFrom, to: dateTo }} onChange={setDateRange} />
           <select
             className="lf-input text-xs h-9 py-0 w-20"
             value={currency}
@@ -166,41 +157,27 @@ export function AppShell() {
               </option>
             ))}
           </select>
-          <div className="hidden md:flex items-center gap-2 pl-2 border-l border-slate-200">
-            <span className="text-xs text-slate-500 max-w-[160px] truncate">{user?.email}</span>
-            <button
-              className="lf-btn-secondary text-xs h-9 py-0"
-              onClick={async () => {
-                await logout();
-                nav("/login");
-              }}
-            >
-              Uitloggen
-            </button>
+          <div className="flex items-center pl-2 border-l border-slate-200">
+            <UserMenu />
           </div>
         </div>
       </header>
 
       <div className="flex flex-1 min-h-0">
-        {/* Module sidebar */}
-        <aside className="w-52 shrink-0 bg-white border-r border-slate-200 py-3 hidden md:block">
+        {/* Module sidebar: regular modules at top, Platform Admin pinned bottom */}
+        <aside className="w-52 shrink-0 bg-white border-r border-slate-200 py-3 hidden md:flex flex-col justify-between">
           <nav className="px-2 space-y-1">
-            {modules.map((m) => {
-              const active = activeModule?.key === m.key;
-              return (
-                <NavLink
-                  key={m.key}
-                  to={`${m.basePath}/${m.subpages[0]!.path}`}
-                  className={`flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium ${
-                    active ? "bg-brand-50 text-brand-700" : "text-slate-600 hover:bg-slate-100"
-                  }`}
-                >
-                  <span aria-hidden>{m.icon}</span>
-                  {m.label}
-                </NavLink>
-              );
-            })}
+            {sidebarTop.map((m) => (
+              <ModuleLink key={m.key} m={m} active={activeModule?.key === m.key} />
+            ))}
           </nav>
+          {sidebarBottom.length > 0 && (
+            <nav className="px-2 space-y-1 pt-3 mt-3 border-t border-slate-100">
+              {sidebarBottom.map((m) => (
+                <ModuleLink key={m.key} m={m} active={activeModule?.key === m.key} />
+              ))}
+            </nav>
+          )}
         </aside>
 
         {/* Main: sub-nav + content */}
@@ -232,5 +209,19 @@ export function AppShell() {
         </main>
       </div>
     </div>
+  );
+}
+
+function ModuleLink({ m, active }: { m: ModuleDef; active: boolean }) {
+  return (
+    <NavLink
+      to={`${m.basePath}/${m.subpages[0]!.path}`}
+      className={`flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium ${
+        active ? "bg-brand-50 text-brand-700" : "text-slate-600 hover:bg-slate-100"
+      }`}
+    >
+      <span aria-hidden>{m.icon}</span>
+      {m.label}
+    </NavLink>
   );
 }
