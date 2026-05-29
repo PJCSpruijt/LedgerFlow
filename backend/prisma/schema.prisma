@@ -88,6 +88,9 @@ model Workspace {
   subscription Subscription?
   auditLogs    AuditLog[]
   vatMappings  VatMapping[]
+  finCategories     FinSemanticCategory[]
+  rgsMappings       SourceAccountMapping[]
+  settings          WorkspaceSettings?
 }
 
 // A Group is a consolidation group inside a workspace (e.g. a holding).
@@ -119,6 +122,8 @@ model Entity {
   memberships    Membership[]
   auditLogs      AuditLog[]
   vatMappings    VatMapping[]
+  sourceAccounts SourceAccount[]
+  rgsMappings    SourceAccountMapping[]
 
   @@index([groupId])
 }
@@ -331,4 +336,116 @@ model ProcessedStripeEvent {
   eventId     String   @id
   type        String
   processedAt DateTime @default(now())
+}
+
+// ---------------------------------------------------------------------------
+// RGS (Referentie Grootboekschema) normalization layer.
+//   Source Account → RGS Mapping → FIN semantic layer → Reporting / Consolidation
+// ---------------------------------------------------------------------------
+
+// The canonical RGS taxonomy. RGS is a public, versioned Dutch standard, so this
+// is PLATFORM-GLOBAL (not per tenant): imported once per version by a platform
+// admin and referenced by everyone via (version, code). ~1500 (MKB) – 4900
+// (decimaal) rows per version.
+model RgsAccount {
+  id               String   @id @default(uuid())
+  version          String // "3.5"
+  code             String // referentiecode, e.g. "BIvaKou"
+  referentienummer String? // 9-digit referentiegrootboeknummer
+  description      String // grootboekomschrijving
+  category         String? // rubriek / hoofdrubriek label
+  // Referentiecode of the parent level (hierarchy is encoded in the code itself).
+  parentCode       String?
+  level            Int // 1..5 (verantwoording → hoofdrubriek → rubriek → rekening → mutatie)
+  rgsType          String // "report" | "mainGroup" | "category" | "account" | "mutation"
+  dc               String? // "D" | "C"
+  isBalanceSheet   Boolean  @default(false) // code starts with B
+  isProfitLoss     Boolean  @default(false) // code starts with W
+  omslagCode       String? // alternative code used on the opposite balance sign
+  sbrConcept       String? // hook for SBR / auditfile interop (later phase)
+  applicability    Json? // entity-type flags (ZZP / EZ / BV / …) from the dataset
+  createdAt        DateTime @default(now())
+
+  @@unique([version, code])
+  @@index([version, parentCode])
+  @@index([version, level])
+}
+
+// GL accounts discovered from a connector's trial balance — the raw "universal
+// chart of accounts" layer, per entity. Immutable source data; mappings live
+// separately so the raw layer is never rewritten.
+model SourceAccount {
+  id          String   @id @default(uuid())
+  entityId    String
+  code        String
+  name        String
+  accountType String   @default("UNKNOWN") // "BALANCE" | "PROFIT_LOSS" | "UNKNOWN"
+  firstSeenAt DateTime @default(now())
+  lastSeenAt  DateTime @default(now())
+
+  entity Entity @relation(fields: [entityId], references: [id], onDelete: Cascade)
+
+  @@unique([entityId, code])
+  @@index([entityId])
+}
+
+// FIN//HUB semantic categories, deliberately SEPARATE from RGS (RGS does not
+// model MRR/ARR/EBITDA/…). workspaceId null = platform default available to all
+// workspaces; a workspace may add its own on top.
+model FinSemanticCategory {
+  id          String   @id @default(uuid())
+  workspaceId String?
+  key         String // "MRR", "ARR", "EBITDA", …
+  label       String
+  kind        String   @default("METRIC") // "REVENUE" | "COST" | "METRIC"
+  description String?
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
+
+  workspace Workspace? @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  mappings  SourceAccountMapping[]
+
+  @@unique([workspaceId, key])
+  @@index([workspaceId])
+}
+
+// Source account → RGS code (+ optional FIN category). IMMUTABLE and AUDITABLE:
+// a change never UPDATEs/DELETEs a row — it inserts a new one and stamps
+// `supersededAt` on the prior current row. The active mapping for a source
+// account is the row with supersededAt = null. Entity-specific resolution
+// mirrors VatMapping (an entity mapping wins; workspace-wide fallback via
+// entityId-null rows is reserved for a later phase).
+model SourceAccountMapping {
+  id                String    @id @default(uuid())
+  workspaceId       String
+  entityId          String
+  sourceAccountCode String
+  rgsVersion        String    @default("3.5")
+  rgsCode           String?
+  finCategoryId     String?
+  confidence        String    @default("MANUAL") // "EXACT" | "SUGGESTED" | "MANUAL"
+  createdByUserId   String?
+  createdAt         DateTime  @default(now())
+  supersededAt      DateTime? // null = active; set when replaced by a newer mapping
+
+  workspace   Workspace            @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  entity      Entity               @relation(fields: [entityId], references: [id], onDelete: Cascade)
+  finCategory FinSemanticCategory? @relation(fields: [finCategoryId], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId, entityId, sourceAccountCode, supersededAt])
+  @@index([entityId, supersededAt])
+}
+
+// Per-workspace feature/normalization settings (1:1 with Workspace).
+model WorkspaceSettings {
+  id          String   @id @default(uuid())
+  workspaceId String   @unique
+  rgsEnabled  Boolean  @default(false)
+  rgsRequired Boolean  @default(false) // required → unmapped accounts are flagged/blocked
+  rgsVersion  String   @default("3.5")
+  extra       Json? // future toggles (notifications, etc.)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
 }
