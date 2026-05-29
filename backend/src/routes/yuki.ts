@@ -12,25 +12,36 @@ import {
 } from "../middleware/auth.js";
 import { requireActiveSubscription } from "../middleware/subscription.js";
 import { getConnectorForEntity } from "../clients/connectors/registry.js";
+import { applyVatMappings } from "../services/vat-mapping.service.js";
 import { YukiConnector } from "../clients/connectors/yuki/YukiConnector.js";
+import { ConnectionKind } from "@prisma/client";
 import { BadRequestError } from "../utils/errors.js";
 
 export const yukiRouter = Router();
 
-/** The Yuki connection lives on an entity, so an entity must be selected. */
+/** A connection lives on an entity, so an entity must be selected. */
 function requireEntity(req: import("express").Request): string {
   const entityId = req.scope?.entityId;
   if (!entityId) throw new BadRequestError("Select an entity (x-entity-id) for connector operations");
   return entityId;
 }
 
-const ConnectionSchema = z.object({
-  accessKey: z.string().min(20, "Yuki access key looks too short"),
-  administrationId: z.string().uuid("administrationId must be a UUID"),
-  environment: z.enum(["PRODUCTION", "SANDBOX"]).default("PRODUCTION"),
-});
+// Connector-specific credential payloads, discriminated by `kind`.
+const ConnectionSchema = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("yuki"),
+    accessKey: z.string().min(20, "Yuki access key looks too short"),
+    administrationId: z.string().uuid("administrationId must be a UUID"),
+    environment: z.enum(["PRODUCTION", "SANDBOX"]).default("PRODUCTION"),
+  }),
+  z.object({
+    kind: z.literal("eboekhouden"),
+    accessToken: z.string().min(20, "e-Boekhouden API-token lijkt te kort"),
+    source: z.string().max(10).optional(),
+  }),
+]);
 
-/** Store or update the Yuki credentials for the active entity. */
+/** Store or update the connector credentials for the active entity. */
 yukiRouter.put(
   "/connection",
   requireAuth,
@@ -39,15 +50,19 @@ yukiRouter.put(
   validateBody(ConnectionSchema),
   asyncHandler(async (req, res) => {
     const entityId = requireEntity(req);
-    const encryptedCredentials = encryptJson({
-      accessKey: req.body.accessKey,
-      administrationId: req.body.administrationId,
-    });
+    const body = req.body as z.infer<typeof ConnectionSchema>;
 
-    const conn = await prisma.yukiConnection.upsert({
+    const encryptedCredentials =
+      body.kind === "yuki"
+        ? encryptJson({ accessKey: body.accessKey, administrationId: body.administrationId })
+        : encryptJson({ accessToken: body.accessToken, source: body.source });
+    const dbKind = body.kind === "yuki" ? ConnectionKind.YUKI : ConnectionKind.EBOEKHOUDEN;
+    const environment = body.kind === "yuki" ? body.environment : "PRODUCTION";
+
+    const conn = await prisma.connection.upsert({
       where: { entityId },
-      create: { entityId, encryptedCredentials, environment: req.body.environment },
-      update: { encryptedCredentials, environment: req.body.environment },
+      create: { entityId, kind: dbKind, encryptedCredentials, environment },
+      update: { kind: dbKind, encryptedCredentials, environment },
     });
 
     await prisma.auditLog.create({
@@ -55,13 +70,14 @@ yukiRouter.put(
         workspaceId: req.scope!.workspaceId,
         entityId,
         userId: req.user!.id,
-        action: "yuki.connection.updated",
+        action: "connection.updated",
+        metadata: { kind: dbKind },
       },
     });
 
     // Best-effort: adopt the administration's name from Yuki so the entity shows
-    // a recognizable label instead of a placeholder. A Yuki hiccup must not fail
-    // the save, so any error here is swallowed.
+    // a recognizable label. (e-Boekhouden's name endpoint is accountant-only, so
+    // we skip it there.) Any hiccup here must not fail the save.
     let administrationName: string | null = null;
     try {
       const connector = await getConnectorForEntity(entityId);
@@ -76,7 +92,7 @@ yukiRouter.put(
     }
 
     res.json({
-      connection: { id: conn.id, environment: conn.environment, updatedAt: conn.updatedAt },
+      connection: { id: conn.id, kind: conn.kind, environment: conn.environment, updatedAt: conn.updatedAt },
       administrationName,
     });
   }),
@@ -89,7 +105,7 @@ yukiRouter.delete(
   requireScopeRole(...SCOPE_ADMIN_ROLES),
   asyncHandler(async (req, res) => {
     const entityId = requireEntity(req);
-    await prisma.yukiConnection.deleteMany({ where: { entityId } });
+    await prisma.connection.deleteMany({ where: { entityId } });
     res.json({ ok: true });
   }),
 );
@@ -100,11 +116,12 @@ yukiRouter.get(
   requireScope,
   asyncHandler(async (req, res) => {
     const entityId = requireEntity(req);
-    const conn = await prisma.yukiConnection.findUnique({ where: { entityId } });
+    const conn = await prisma.connection.findUnique({ where: { entityId } });
     res.json({
       connection: conn
         ? {
             id: conn.id,
+            kind: conn.kind,
             environment: conn.environment,
             lastTestedAt: conn.lastTestedAt,
             lastSyncAt: conn.lastSyncAt,
@@ -124,11 +141,10 @@ yukiRouter.get(
     const connector = await getConnectorForEntity(entityId);
     const result = await connector.testConnection();
 
-    if (connector instanceof YukiConnector) {
-      await prisma.yukiConnection.update({
-        where: { entityId },
-        data: { lastTestedAt: new Date() },
-      });
+    if (result.ok) {
+      await prisma.connection
+        .update({ where: { entityId }, data: { lastTestedAt: new Date() } })
+        .catch(() => undefined);
     }
 
     res.json(result);
@@ -160,9 +176,11 @@ yukiRouter.get(
   requireActiveSubscription,
   validateQuery(DateRangeQuery),
   asyncHandler(async (req, res) => {
-    const connector = await getConnectorForEntity(requireEntity(req));
+    const entityId = requireEntity(req);
+    const connector = await getConnectorForEntity(entityId);
     const data = await connector.getTransactions(req.query as unknown as { from: string; to: string });
-    res.json({ range: req.query, rows: data });
+    const rows = await applyVatMappings(data, req.scope!.workspaceId, entityId);
+    res.json({ range: req.query, rows });
   }),
 );
 

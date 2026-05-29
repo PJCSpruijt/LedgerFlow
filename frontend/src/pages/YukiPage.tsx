@@ -2,8 +2,11 @@ import { useEffect, useState } from "react";
 import { api, ApiError } from "../services/api";
 import { isAdminRole, useScope } from "../contexts/ScopeContext";
 
+type Kind = "yuki" | "eboekhouden";
+
 interface ConnectionInfo {
   id: string;
+  kind: "YUKI" | "EBOEKHOUDEN";
   environment: "PRODUCTION" | "SANDBOX";
   lastTestedAt: string | null;
   lastSyncAt: string | null;
@@ -16,13 +19,17 @@ interface TestResult {
   administrations?: { id: string; name: string }[];
 }
 
+const KIND_LABEL: Record<string, string> = { YUKI: "Yuki", EBOEKHOUDEN: "e-Boekhouden" };
+
 export function YukiPage() {
   const { entity, reload } = useScope();
   const [conn, setConn] = useState<ConnectionInfo | null>(null);
+  const [kind, setKind] = useState<Kind>("yuki");
   const [form, setForm] = useState({
     accessKey: "",
     administrationId: "",
     environment: "PRODUCTION" as "PRODUCTION" | "SANDBOX",
+    accessToken: "",
   });
   const [msg, setMsg] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -39,6 +46,7 @@ export function YukiPage() {
       try {
         const r = await api<{ connection: ConnectionInfo | null }>("/api/yuki/connection");
         setConn(r.connection);
+        if (r.connection) setKind(r.connection.kind === "EBOEKHOUDEN" ? "eboekhouden" : "yuki");
       } catch {
         /* ignore */
       }
@@ -52,19 +60,27 @@ export function YukiPage() {
     setErr(null);
     setSaving(true);
     try {
+      const body =
+        kind === "yuki"
+          ? {
+              kind,
+              accessKey: form.accessKey,
+              administrationId: form.administrationId,
+              environment: form.environment,
+            }
+          : { kind, accessToken: form.accessToken };
       const saved = await api<{ administrationName: string | null }>("/api/yuki/connection", {
         method: "PUT",
-        body: form,
+        body,
       });
       setMsg(
         saved.administrationName
-          ? `Yuki-verbinding opgeslagen — administratie: ${saved.administrationName}`
-          : "Yuki-verbinding opgeslagen",
+          ? `Koppeling opgeslagen — administratie: ${saved.administrationName}`
+          : "Koppeling opgeslagen",
       );
-      setForm({ ...form, accessKey: "" });
+      setForm({ ...form, accessKey: "", accessToken: "" });
       const r = await api<{ connection: ConnectionInfo | null }>("/api/yuki/connection");
       setConn(r.connection);
-      // Refresh the scope tree so the entity's adopted Yuki name shows in the sidebar.
       await reload();
     } catch (e) {
       setErr(e instanceof ApiError ? e.message : "Opslaan mislukt");
@@ -88,7 +104,7 @@ export function YukiPage() {
   };
 
   const disconnect = async () => {
-    if (!confirm("Yuki-verbinding loskoppelen?")) return;
+    if (!confirm("Koppeling loskoppelen?")) return;
     await api("/api/yuki/connection", { method: "DELETE" });
     setConn(null);
   };
@@ -96,7 +112,7 @@ export function YukiPage() {
   if (!entity) {
     return (
       <div className="lf-card max-w-2xl">
-        Selecteer een administratie in de zijbalk om de Yuki-koppeling te beheren.
+        Selecteer een administratie in de zijbalk om de koppeling te beheren.
       </div>
     );
   }
@@ -104,9 +120,9 @@ export function YukiPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-semibold">Yuki-koppeling</h1>
+        <h1 className="text-2xl font-semibold">Boekhoudkoppeling</h1>
         <p className="text-sm text-slate-500 mt-1">
-          Verbind je Yuki-administratie met een Web service API-key en Administration ID.
+          Koppel deze administratie aan Yuki of e-Boekhouden.
         </p>
       </div>
 
@@ -115,7 +131,9 @@ export function YukiPage() {
           <div>
             <div className="text-sm text-slate-500">Status</div>
             <div className="text-lg font-semibold mt-1">
-              {conn ? `Verbonden (${conn.environment})` : "Niet verbonden"}
+              {conn
+                ? `Verbonden — ${KIND_LABEL[conn.kind] ?? conn.kind}${conn.kind === "YUKI" ? ` (${conn.environment})` : ""}`
+                : "Niet verbonden"}
             </div>
             {conn?.lastTestedAt && (
               <div className="text-xs text-slate-500 mt-1">
@@ -136,9 +154,7 @@ export function YukiPage() {
         </div>
 
         {test && (
-          <div
-            className={`mt-4 text-sm ${test.ok ? "text-emerald-700" : "text-red-600"}`}
-          >
+          <div className={`mt-4 text-sm ${test.ok ? "text-emerald-700" : "text-red-600"}`}>
             {test.message}
             {test.administrations && test.administrations.length > 0 && (
               <ul className="mt-2 list-disc pl-5 text-slate-700">
@@ -155,47 +171,73 @@ export function YukiPage() {
 
       {canEdit && (
         <div className="lf-card max-w-2xl space-y-4">
-          <h2 className="text-lg font-semibold">
-            {conn ? "Wijzig verbinding" : "Nieuwe verbinding"}
-          </h2>
+          <h2 className="text-lg font-semibold">{conn ? "Wijzig koppeling" : "Nieuwe koppeling"}</h2>
 
           <div>
-            <label className="lf-label">Web service API-key</label>
-            <input
-              className="lf-input font-mono text-xs"
-              type="password"
-              placeholder="07b46e02-1014-4884-8bfa-…"
-              value={form.accessKey}
-              onChange={(e) => setForm({ ...form, accessKey: e.target.value })}
-            />
-            <p className="text-xs text-slate-500 mt-1">
-              Genereer deze in Yuki via Instellingen → Web services → Web service API-key.
-            </p>
-          </div>
-
-          <div>
-            <label className="lf-label">Administration ID (UUID)</label>
-            <input
-              className="lf-input font-mono text-xs"
-              placeholder="51f30965-f7e2-44d7-9a40-…"
-              value={form.administrationId}
-              onChange={(e) => setForm({ ...form, administrationId: e.target.value })}
-            />
-          </div>
-
-          <div>
-            <label className="lf-label">Omgeving</label>
+            <label className="lf-label">Koppelingstype</label>
             <select
               className="lf-input"
-              value={form.environment}
-              onChange={(e) =>
-                setForm({ ...form, environment: e.target.value as "PRODUCTION" | "SANDBOX" })
-              }
+              value={kind}
+              onChange={(e) => setKind(e.target.value as Kind)}
             >
-              <option value="PRODUCTION">Productie</option>
-              <option value="SANDBOX">Sandbox</option>
+              <option value="yuki">Yuki</option>
+              <option value="eboekhouden">e-Boekhouden</option>
             </select>
           </div>
+
+          {kind === "yuki" ? (
+            <>
+              <div>
+                <label className="lf-label">Web service API-key</label>
+                <input
+                  className="lf-input font-mono text-xs"
+                  type="password"
+                  placeholder="07b46e02-1014-4884-8bfa-…"
+                  value={form.accessKey}
+                  onChange={(e) => setForm({ ...form, accessKey: e.target.value })}
+                />
+                <p className="text-xs text-slate-500 mt-1">
+                  Genereer deze in Yuki via Instellingen → Web services → Web service API-key.
+                </p>
+              </div>
+              <div>
+                <label className="lf-label">Administration ID (UUID)</label>
+                <input
+                  className="lf-input font-mono text-xs"
+                  placeholder="51f30965-f7e2-44d7-9a40-…"
+                  value={form.administrationId}
+                  onChange={(e) => setForm({ ...form, administrationId: e.target.value })}
+                />
+              </div>
+              <div>
+                <label className="lf-label">Omgeving</label>
+                <select
+                  className="lf-input"
+                  value={form.environment}
+                  onChange={(e) =>
+                    setForm({ ...form, environment: e.target.value as "PRODUCTION" | "SANDBOX" })
+                  }
+                >
+                  <option value="PRODUCTION">Productie</option>
+                  <option value="SANDBOX">Sandbox</option>
+                </select>
+              </div>
+            </>
+          ) : (
+            <div>
+              <label className="lf-label">e-Boekhouden API-token</label>
+              <input
+                className="lf-input font-mono text-xs"
+                type="password"
+                placeholder="API-token uit e-Boekhouden"
+                value={form.accessToken}
+                onChange={(e) => setForm({ ...form, accessToken: e.target.value })}
+              />
+              <p className="text-xs text-slate-500 mt-1">
+                Maak deze in e-Boekhouden via Beheer → Instellingen → API/koppelingen.
+              </p>
+            </div>
+          )}
 
           {msg && <div className="text-sm text-emerald-700">{msg}</div>}
           {err && <div className="text-sm text-red-600">{err}</div>}

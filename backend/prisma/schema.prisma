@@ -87,6 +87,7 @@ model Workspace {
   memberships  Membership[]
   subscription Subscription?
   auditLogs    AuditLog[]
+  vatMappings  VatMapping[]
 }
 
 // A Group is a consolidation group inside a workspace (e.g. a holding).
@@ -114,9 +115,10 @@ model Entity {
   updatedAt DateTime @updatedAt
 
   group          Group           @relation(fields: [groupId], references: [id], onDelete: Cascade)
-  yukiConnection YukiConnection?
+  connection     Connection?
   memberships    Membership[]
   auditLogs      AuditLog[]
+  vatMappings    VatMapping[]
 
   @@index([groupId])
 }
@@ -239,12 +241,24 @@ enum YukiEnvironment {
   SANDBOX
 }
 
-model YukiConnection {
+// Which accounting system a connection talks to. The generic connector layer
+// dispatches on this (see clients/connectors/registry.ts).
+enum ConnectionKind {
+  YUKI
+  EBOEKHOUDEN
+}
+
+// A connector binding for an entity (one administration). Credentials are
+// AES-256-GCM encrypted at rest and NEVER returned to the frontend. The shape of
+// the decrypted payload depends on `kind`:
+//   YUKI        → { accessKey, administrationId }
+//   EBOEKHOUDEN → { accessToken, source? }
+model Connection {
   id                   String          @id @default(uuid())
   entityId             String          @unique
-  // AES-256-GCM ciphertext of a JSON payload containing the Yuki credentials
-  // (e.g. { apiKey, administrationId }). NEVER returned to the frontend.
+  kind                 ConnectionKind  @default(YUKI)
   encryptedCredentials String
+  // Yuki-only: production vs sandbox. Ignored by other connectors.
   environment          YukiEnvironment @default(PRODUCTION)
   lastTestedAt         DateTime?
   lastSyncAt           DateTime?
@@ -252,6 +266,31 @@ model YukiConnection {
   updatedAt            DateTime        @updatedAt
 
   entity Entity @relation(fields: [entityId], references: [id], onDelete: Cascade)
+}
+
+// User-maintained VAT account mappings, scoped to a workspace and optionally a
+// single entity (entity-specific wins over workspace-wide). The connector
+// resolution layer applies these to generated VAT lines; connector inference
+// NEVER overwrites a mapping a user has set.
+model VatMapping {
+  id                      String   @id @default(uuid())
+  workspaceId             String
+  entityId                String?
+  sourceVatCode           String
+  // Optional finer key: the source revenue/cost ledger code the VAT relates to.
+  // "" = applies to any source ledger for this VAT code.
+  sourceLedgerAccountCode String   @default("")
+  // The GL account VAT should post to (a ledger code today; the universal tax
+  // account once the universal chart of accounts (phase 4) exists).
+  targetLedgerCode        String
+  createdAt               DateTime @default(now())
+  updatedAt               DateTime @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  entity    Entity?   @relation(fields: [entityId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
+  @@index([entityId])
 }
 
 model AuditLog {

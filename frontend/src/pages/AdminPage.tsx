@@ -14,8 +14,15 @@ interface AdminUser {
 interface AdminEntity {
   id: string;
   name: string;
-  yuki: { environment: string; lastTestedAt: string | null; lastSyncAt: string | null } | null;
+  connection: {
+    kind: "YUKI" | "EBOEKHOUDEN";
+    environment: string;
+    lastTestedAt: string | null;
+    lastSyncAt: string | null;
+  } | null;
 }
+
+const CONNECTION_LABEL: Record<string, string> = { YUKI: "Yuki", EBOEKHOUDEN: "e-Boekhouden" };
 interface AdminGroup {
   id: string;
   name: string;
@@ -529,12 +536,13 @@ export function AdminPage() {
                         {g.entities.map((e) => (
                           <li key={e.id} className="text-sm flex items-center gap-2">
                             <span>{e.name}</span>
-                            {e.yuki ? (
+                            {e.connection ? (
                               <span
                                 className="lf-pill bg-emerald-100 text-emerald-800"
-                                title={`Laatst getest: ${fmtDateTime(e.yuki.lastTestedAt)} · Laatste sync: ${fmtDateTime(e.yuki.lastSyncAt)}`}
+                                title={`Laatst getest: ${fmtDateTime(e.connection.lastTestedAt)} · Laatste sync: ${fmtDateTime(e.connection.lastSyncAt)}`}
                               >
-                                Yuki ({e.yuki.environment})
+                                {CONNECTION_LABEL[e.connection.kind] ?? e.connection.kind}
+                                {e.connection.kind === "YUKI" ? ` (${e.connection.environment})` : ""}
                               </span>
                             ) : (
                               <span className="lf-pill bg-slate-200 text-slate-600">

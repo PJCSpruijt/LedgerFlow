@@ -6,7 +6,11 @@ import { validateQuery } from "../middleware/validate.js";
 import { requireAuth, requireScope, isPlatformAdmin } from "../middleware/auth.js";
 import { requireModule } from "../middleware/subscription.js";
 import { getWorkspaceEntitlements } from "../services/plan.service.js";
-import { getConnectorForEntity } from "../clients/connectors/registry.js";
+import { applyVatMappings } from "../services/vat-mapping.service.js";
+import {
+  tryGetConnectorForEntity,
+  NO_CONNECTOR_MESSAGE,
+} from "../clients/connectors/registry.js";
 import {
   buildTransactionsWorkbook,
   buildTrialBalanceWorkbook,
@@ -14,7 +18,7 @@ import {
   type TransactionExportRow,
   type TrialBalanceExportRow,
 } from "../services/export.service.js";
-import { ForbiddenError, ModuleRequiredError } from "../utils/errors.js";
+import { ForbiddenError, ModuleRequiredError, NotFoundError } from "../utils/errors.js";
 
 export const exportRouter = Router();
 
@@ -132,6 +136,47 @@ async function assertMultiAdminAllowed(
   }
 }
 
+interface EntityWithConnector {
+  entity: ResolvedEntity;
+  connector: import("../clients/connectors/interfaces/Connector.js").Connector;
+}
+
+/**
+ * Pair each resolved administration with its connector. Administrations without
+ * a connector configured are skipped — their names are returned in `skipped` so
+ * a multi-administration export doesn't fail wholesale on one unlinked entity.
+ * The exception: when exactly one administration was resolved, a missing
+ * connector is a hard NotFoundError — a single-administration export with
+ * nothing to export should report the problem, not return an empty workbook.
+ * Authorization is already enforced upstream by resolveAuthorizedEntities.
+ */
+async function resolveConnectors(
+  entities: ResolvedEntity[],
+): Promise<{ pairs: EntityWithConnector[]; skipped: ResolvedEntity[] }> {
+  const pairs: EntityWithConnector[] = [];
+  const skipped: ResolvedEntity[] = [];
+  for (const entity of entities) {
+    const connector = await tryGetConnectorForEntity(entity.id);
+    if (!connector) {
+      if (entities.length === 1) throw new NotFoundError(NO_CONNECTOR_MESSAGE);
+      skipped.push(entity);
+      continue;
+    }
+    pairs.push({ entity, connector });
+  }
+  return { pairs, skipped };
+}
+
+/** Advertise skipped administrations on the response (CORS-exposed in app.ts). */
+function setSkippedHeader(res: import("express").Response, skipped: ResolvedEntity[]): void {
+  if (!skipped.length) return;
+  // Names can contain non-ASCII (Dutch); encode each to keep the header valid.
+  res.setHeader(
+    "X-Skipped-Administrations",
+    skipped.map((e) => encodeURIComponent(e.name)).join(","),
+  );
+}
+
 function sendXlsx(res: import("express").Response, buf: Buffer, filename: string): void {
   res.setHeader(
     "Content-Type",
@@ -156,10 +201,10 @@ exportRouter.get(
     await assertMultiAdminAllowed(req, workspaceId, entities.length);
     const range = { from: query.from, to: query.to };
 
+    const { pairs, skipped } = await resolveConnectors(entities);
     const rows: TrialBalanceExportRow[] = [];
     const connectorKinds = new Set<string>();
-    for (const entity of entities) {
-      const connector = await getConnectorForEntity(entity.id);
+    for (const { entity, connector } of pairs) {
       connectorKinds.add(connector.kind);
       const lines = await connector.getTrialBalance(range);
       for (const line of lines) rows.push({ ...line, administration: entity.name });
@@ -167,7 +212,8 @@ exportRouter.get(
 
     const ctx: ExportContext = {
       scopeLabel: scopeLabel(entities, requestedIds === null),
-      administrations: entities.map((e) => e.name),
+      administrations: pairs.map((p) => p.entity.name),
+      skippedAdministrations: skipped.map((e) => e.name),
       generatedAt: new Date(),
       from: range.from,
       to: range.to,
@@ -184,10 +230,12 @@ exportRouter.get(
           from: range.from,
           to: range.to,
           count: rows.length,
-          entityIds: entities.map((e) => e.id),
+          entityIds: pairs.map((p) => p.entity.id),
+          skippedEntityIds: skipped.map((e) => e.id),
         },
       },
     });
+    setSkippedHeader(res, skipped);
     sendXlsx(res, buf, `ledgerflow-proefbalans-${range.from}_${range.to}.xlsx`);
   }),
 );
@@ -206,18 +254,21 @@ exportRouter.get(
     await assertMultiAdminAllowed(req, workspaceId, entities.length);
     const range = { from: query.from, to: query.to };
 
+    const { pairs, skipped } = await resolveConnectors(entities);
     const rows: TransactionExportRow[] = [];
     const connectorKinds = new Set<string>();
-    for (const entity of entities) {
-      const connector = await getConnectorForEntity(entity.id);
+    for (const { entity, connector } of pairs) {
       connectorKinds.add(connector.kind);
       const lines = await connector.getTransactions(range);
-      for (const line of lines) rows.push({ ...line, administration: entity.name });
+      // Apply user-maintained VAT account mappings on top of connector inference.
+      const mapped = await applyVatMappings(lines, workspaceId, entity.id);
+      for (const line of mapped) rows.push({ ...line, administration: entity.name });
     }
 
     const ctx: ExportContext = {
       scopeLabel: scopeLabel(entities, requestedIds === null),
-      administrations: entities.map((e) => e.name),
+      administrations: pairs.map((p) => p.entity.name),
+      skippedAdministrations: skipped.map((e) => e.name),
       generatedAt: new Date(),
       from: range.from,
       to: range.to,
@@ -234,10 +285,12 @@ exportRouter.get(
           from: range.from,
           to: range.to,
           count: rows.length,
-          entityIds: entities.map((e) => e.id),
+          entityIds: pairs.map((p) => p.entity.id),
+          skippedEntityIds: skipped.map((e) => e.id),
         },
       },
     });
+    setSkippedHeader(res, skipped);
     sendXlsx(res, buf, `ledgerflow-mutaties-${range.from}_${range.to}.xlsx`);
   }),
 );

@@ -84,8 +84,14 @@ adminRouter.get(
             entities: {
               orderBy: { createdAt: "asc" },
               include: {
-                yukiConnection: {
-                  select: { id: true, environment: true, lastTestedAt: true, lastSyncAt: true },
+                connection: {
+                  select: {
+                    id: true,
+                    kind: true,
+                    environment: true,
+                    lastTestedAt: true,
+                    lastSyncAt: true,
+                  },
                 },
               },
             },
@@ -116,11 +122,12 @@ adminRouter.get(
           entities: g.entities.map((e) => ({
             id: e.id,
             name: e.name,
-            yuki: e.yukiConnection
+            connection: e.connection
               ? {
-                  environment: e.yukiConnection.environment,
-                  lastTestedAt: e.yukiConnection.lastTestedAt,
-                  lastSyncAt: e.yukiConnection.lastSyncAt,
+                  kind: e.connection.kind,
+                  environment: e.connection.environment,
+                  lastTestedAt: e.connection.lastTestedAt,
+                  lastSyncAt: e.connection.lastSyncAt,
                 }
               : null,
           })),

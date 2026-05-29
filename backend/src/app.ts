@@ -18,6 +18,7 @@ import { yukiRouter } from "./routes/yuki.js";
 import { exportRouter } from "./routes/export.js";
 import { billingRouter, stripeWebhookRouter } from "./routes/billing.js";
 import { adminRouter } from "./routes/admin.js";
+import { vatMappingRouter } from "./routes/vatMapping.js";
 
 /**
  * Build the Express app. Exposed as a factory so tests can mount it without
@@ -38,6 +39,9 @@ export function createApp() {
     cors({
       origin: env.CORS_ORIGIN.split(",").map((s) => s.trim()),
       credentials: true,
+      // Let the browser SPA read these on download responses (otherwise hidden
+      // cross-origin): the filename, and which administrations the export skipped.
+      exposedHeaders: ["Content-Disposition", "X-Skipped-Administrations"],
     }),
   );
   app.use(express.json({ limit: "1mb" }));
@@ -74,6 +78,7 @@ export function createApp() {
   app.use("/api/export", exportRouter);
   app.use("/api/billing", billingRouter);
   app.use("/api/admin", adminRouter);
+  app.use("/api/vat-mappings", vatMappingRouter);
 
   app.use(notFoundHandler);
   app.use(errorHandler);

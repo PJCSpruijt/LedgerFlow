@@ -6,8 +6,9 @@ import { api } from "../services/api";
 
 const navItems = [
   { to: "/dashboard", label: "Dashboard" },
-  { to: "/yuki", label: "Yuki-koppeling" },
+  { to: "/yuki", label: "Boekhoudkoppeling" },
   { to: "/exports", label: "Excel-exports" },
+  { to: "/vat-mapping", label: "BTW-koppelingen" },
   { to: "/billing", label: "Abonnement" },
   { to: "/settings", label: "Instellingen" },
 ];
