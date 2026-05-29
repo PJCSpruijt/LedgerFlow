@@ -16,6 +16,7 @@ const adminNavItems = [
   { to: "/admin", label: "Beheer" },
   { to: "/admin/users", label: "Gebruikers" },
   { to: "/admin/plans", label: "Abonnementen" },
+  { to: "/admin/stats", label: "Statistieken" },
 ];
 
 export function AppLayout() {

@@ -13,6 +13,7 @@ import { ExportsPage } from "./pages/ExportsPage";
 import { AdminPage } from "./pages/AdminPage";
 import { AdminPlansPage } from "./pages/AdminPlansPage";
 import { AdminUsersPage } from "./pages/AdminUsersPage";
+import { AdminStatsPage } from "./pages/AdminStatsPage";
 import { AcceptInvitationPage, ResetPasswordPage } from "./pages/SetPasswordPage";
 import { MandatoryTwoFactorPage } from "./pages/MandatoryTwoFactorPage";
 
@@ -97,6 +98,14 @@ export function App() {
           element={
             <RequirePlatformAdmin>
               <AdminUsersPage />
+            </RequirePlatformAdmin>
+          }
+        />
+        <Route
+          path="/admin/stats"
+          element={
+            <RequirePlatformAdmin>
+              <AdminStatsPage />
             </RequirePlatformAdmin>
           }
         />

@@ -27,6 +27,9 @@ model User {
   firstName     String
   lastName      String
   platformRole  PlatformRole @default(USER)
+  // Login stats (set on each successful authentication, incl. completed 2FA).
+  lastLoginAt   DateTime?
+  loginCount    Int          @default(0)
   // 2FA (TOTP). The secret is AES-256-GCM encrypted at rest (utils/crypto).
   // `enabled` = enrollment confirmed (challenged at login); `required` = an
   // admin mandated 2FA for this user (must enroll).

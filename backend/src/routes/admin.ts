@@ -16,7 +16,7 @@ import {
 import { prisma } from "../config/prisma.js";
 import { env } from "../config/env.js";
 import { asyncHandler } from "../middleware/asyncHandler.js";
-import { validateBody, validateParams } from "../middleware/validate.js";
+import { validateBody, validateParams, validateQuery } from "../middleware/validate.js";
 import { requireAuth, requirePlatformAdmin } from "../middleware/auth.js";
 import { MODULES, isModuleKey } from "../config/modules.js";
 import { createUserToken } from "../services/auth.service.js";
@@ -675,6 +675,124 @@ async function firstWorkspaceId(userId: string): Promise<string | null> {
   });
   return m?.workspaceId ?? null;
 }
+
+/* -------------------------------------------------------------------------- */
+/*  Statistics                                                                */
+/* -------------------------------------------------------------------------- */
+
+const EXPORT_ACTIONS = ["export.trial-balance", "export.transactions"];
+
+const StatsQuery = z.object({
+  // Window in days for activity metrics; 0 = all-time.
+  days: z.coerce.number().int().min(0).max(3650).default(30),
+});
+
+/**
+ * Platform statistics per workspace and per user. Activity metrics (events,
+ * exports) are scoped to the selected window; login counts are cumulative.
+ * "API-verbruik" is represented by export/sync actions, the metered operations
+ * we record in the audit log.
+ */
+adminRouter.get(
+  "/stats",
+  validateQuery(StatsQuery),
+  asyncHandler(async (req, res) => {
+    const { days } = req.query as unknown as { days: number };
+    const since = days > 0 ? new Date(Date.now() - days * 86_400_000) : null;
+    const tsFilter = since ? { timestamp: { gte: since } } : {};
+
+    const [users, workspaces] = await Promise.all([
+      prisma.user.findMany({
+        orderBy: { createdAt: "asc" },
+        select: {
+          id: true,
+          email: true,
+          firstName: true,
+          lastName: true,
+          platformRole: true,
+          createdAt: true,
+          lastLoginAt: true,
+          loginCount: true,
+        },
+      }),
+      prisma.workspace.findMany({
+        orderBy: { createdAt: "asc" },
+        select: {
+          id: true,
+          name: true,
+          createdAt: true,
+          _count: { select: { memberships: true } },
+          subscription: { select: { status: true, plan: true, planRef: { select: { name: true } } } },
+          groups: { select: { _count: { select: { entities: true } } } },
+        },
+      }),
+    ]);
+
+    const [eventsByWs, exportsByWs, lastByWs, actionsByUser, exportsByUser] = await Promise.all([
+      prisma.auditLog.groupBy({ by: ["workspaceId"], where: tsFilter, _count: { _all: true } }),
+      prisma.auditLog.groupBy({
+        by: ["workspaceId"],
+        where: { action: { in: EXPORT_ACTIONS }, ...tsFilter },
+        _count: { _all: true },
+      }),
+      prisma.auditLog.groupBy({ by: ["workspaceId"], _max: { timestamp: true } }),
+      prisma.auditLog.groupBy({ by: ["userId"], where: tsFilter, _count: { _all: true } }),
+      prisma.auditLog.groupBy({
+        by: ["userId"],
+        where: { action: { in: EXPORT_ACTIONS }, ...tsFilter },
+        _count: { _all: true },
+      }),
+    ]);
+
+    const countMap = (rows: Array<{ _count: { _all: number } }>, key: "workspaceId" | "userId") =>
+      new Map(rows.map((r) => [(r as Record<string, unknown>)[key] as string | null, r._count._all]));
+    const eventsMap = countMap(eventsByWs, "workspaceId");
+    const exportsMap = countMap(exportsByWs, "workspaceId");
+    const lastMap = new Map(lastByWs.map((r) => [r.workspaceId, r._max.timestamp]));
+    const userActionsMap = countMap(actionsByUser, "userId");
+    const userExportsMap = countMap(exportsByUser, "userId");
+
+    const isActive = (s?: string) => s === "ACTIVE" || s === "TRIALING";
+
+    const perWorkspace = workspaces.map((ws) => ({
+      id: ws.id,
+      name: ws.name,
+      createdAt: ws.createdAt,
+      memberCount: ws._count.memberships,
+      entityCount: ws.groups.reduce((n, g) => n + g._count.entities, 0),
+      planName: ws.subscription?.planRef?.name ?? ws.subscription?.plan ?? null,
+      subscriptionStatus: ws.subscription?.status ?? "NONE",
+      events: eventsMap.get(ws.id) ?? 0,
+      exports: exportsMap.get(ws.id) ?? 0,
+      lastActivity: lastMap.get(ws.id) ?? null,
+    }));
+
+    const perUser = users.map((u) => ({
+      id: u.id,
+      name: `${u.firstName} ${u.lastName}`,
+      email: u.email,
+      platformRole: u.platformRole,
+      loginCount: u.loginCount,
+      lastLoginAt: u.lastLoginAt,
+      actions: userActionsMap.get(u.id) ?? 0,
+      exports: userExportsMap.get(u.id) ?? 0,
+    }));
+
+    res.json({
+      days,
+      totals: {
+        users: users.length,
+        workspaces: workspaces.length,
+        entities: perWorkspace.reduce((n, w) => n + w.entityCount, 0),
+        activeSubscriptions: workspaces.filter((w) => isActive(w.subscription?.status)).length,
+        events: perWorkspace.reduce((n, w) => n + w.events, 0),
+        exports: perWorkspace.reduce((n, w) => n + w.exports, 0),
+      },
+      perWorkspace,
+      perUser,
+    });
+  }),
+);
 
 /* -------------------------------------------------------------------------- */
 /*  Memberships (couple a user to a workspace / group / administration)       */

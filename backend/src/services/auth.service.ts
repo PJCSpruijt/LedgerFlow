@@ -169,6 +169,7 @@ export async function login(input: LoginInput): Promise<AuthResult | TwoFactorCh
     return { twoFactorRequired: true, challengeToken: signChallengeToken(user.id) };
   }
 
+  await recordLogin(user.id);
   const tokens = await issueTokens(user.id, user.email, user.platformRole);
 
   return {
@@ -181,6 +182,14 @@ export async function login(input: LoginInput): Promise<AuthResult | TwoFactorCh
     },
     ...tokens,
   };
+}
+
+/** Bump login stats on a successful authentication. */
+async function recordLogin(userId: string): Promise<void> {
+  await prisma.user.update({
+    where: { id: userId },
+    data: { loginCount: { increment: 1 }, lastLoginAt: new Date() },
+  });
 }
 
 const CHALLENGE_TTL = "5m";
@@ -215,6 +224,7 @@ export async function loginVerifyTwoFactor(
   if (!verifyTotp(code, decryptString(user.twoFactorSecret))) {
     throw new UnauthorizedError("Ongeldige verificatiecode");
   }
+  await recordLogin(user.id);
   const tokens = await issueTokens(user.id, user.email, user.platformRole);
   return {
     user: {
