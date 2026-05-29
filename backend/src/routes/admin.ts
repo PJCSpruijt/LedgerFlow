@@ -1,12 +1,27 @@
 import { Router } from "express";
 import { z } from "zod";
-import { BillingInterval, SubscriptionPlan, SubscriptionStatus } from "@prisma/client";
+import bcrypt from "bcryptjs";
+import { randomBytes } from "node:crypto";
+import {
+  BillingInterval,
+  PlatformRole,
+  SubscriptionPlan,
+  SubscriptionStatus,
+  UserTokenKind,
+} from "@prisma/client";
 import { prisma } from "../config/prisma.js";
+import { env } from "../config/env.js";
 import { asyncHandler } from "../middleware/asyncHandler.js";
 import { validateBody, validateParams } from "../middleware/validate.js";
 import { requireAuth, requirePlatformAdmin } from "../middleware/auth.js";
 import { MODULES, isModuleKey } from "../config/modules.js";
-import { BadRequestError, NotFoundError } from "../utils/errors.js";
+import { createUserToken } from "../services/auth.service.js";
+import {
+  isEmailConfigured,
+  sendInvitationEmail,
+  sendPasswordResetEmail,
+} from "../services/email.service.js";
+import { BadRequestError, ConflictError, ForbiddenError, NotFoundError } from "../utils/errors.js";
 
 export const adminRouter = Router();
 
@@ -27,6 +42,8 @@ adminRouter.get(
         firstName: true,
         lastName: true,
         platformRole: true,
+        twoFactorEnabled: true,
+        twoFactorRequired: true,
         createdAt: true,
         _count: { select: { memberships: true } },
       },
@@ -38,6 +55,8 @@ adminRouter.get(
         firstName: u.firstName,
         lastName: u.lastName,
         platformRole: u.platformRole,
+        twoFactorEnabled: u.twoFactorEnabled,
+        twoFactorRequired: u.twoFactorRequired,
         createdAt: u.createdAt,
         membershipCount: u._count.memberships,
       })),
@@ -361,3 +380,222 @@ adminRouter.patch(
     });
   }),
 );
+
+/* -------------------------------------------------------------------------- */
+/*  User management                                                          */
+/* -------------------------------------------------------------------------- */
+
+function inviteLink(rawToken: string): string {
+  return `${env.APP_BASE_URL}/accept-invitation?token=${rawToken}`;
+}
+function resetLink(rawToken: string): string {
+  return `${env.APP_BASE_URL}/reset-password?token=${rawToken}`;
+}
+
+/**
+ * Guard against locking everyone out of the platform: there must always be at
+ * least one PLATFORM_ADMIN. Throws if `userId` is the last admin (used before a
+ * role downgrade or deletion).
+ */
+async function assertNotLastPlatformAdmin(userId: string): Promise<void> {
+  const target = await prisma.user.findUnique({ where: { id: userId }, select: { platformRole: true } });
+  if (target?.platformRole !== PlatformRole.PLATFORM_ADMIN) return;
+  const adminCount = await prisma.user.count({ where: { platformRole: PlatformRole.PLATFORM_ADMIN } });
+  if (adminCount <= 1) {
+    throw new BadRequestError("Dit is de laatste platformbeheerder; die kan niet verwijderd of gedegradeerd worden.");
+  }
+}
+
+const UserCreateSchema = z.object({
+  email: z.string().email(),
+  firstName: z.string().min(1).max(80),
+  lastName: z.string().min(1).max(80),
+  platformRole: z.nativeEnum(PlatformRole).default(PlatformRole.USER),
+});
+
+const UserUpdateSchema = z.object({
+  email: z.string().email().optional(),
+  firstName: z.string().min(1).max(80).optional(),
+  lastName: z.string().min(1).max(80).optional(),
+  platformRole: z.nativeEnum(PlatformRole).optional(),
+});
+
+const UserIdParam = z.object({ id: z.string().uuid() });
+
+/** Create a user and email them an invitation to set their password. */
+adminRouter.post(
+  "/users",
+  validateBody(UserCreateSchema),
+  asyncHandler(async (req, res) => {
+    const body = req.body as z.infer<typeof UserCreateSchema>;
+    const email = body.email.toLowerCase();
+    const existing = await prisma.user.findUnique({ where: { email } });
+    if (existing) throw new ConflictError("Er bestaat al een gebruiker met dit e-mailadres");
+
+    // Unusable random password until the invite is accepted.
+    const passwordHash = await bcrypt.hash(randomBytes(32).toString("base64url"), 12);
+    const user = await prisma.user.create({
+      data: {
+        email,
+        firstName: body.firstName,
+        lastName: body.lastName,
+        platformRole: body.platformRole,
+        passwordHash,
+      },
+      select: { id: true, email: true, firstName: true, lastName: true, platformRole: true, createdAt: true },
+    });
+
+    const rawToken = await createUserToken(user.id, UserTokenKind.INVITE);
+    const link = inviteLink(rawToken);
+    const sent = await sendInvitationEmail({ to: user.email, firstName: user.firstName, link });
+
+    res.status(201).json({
+      user: { ...user, membershipCount: 0, twoFactorEnabled: false, twoFactorRequired: false },
+      emailDelivered: sent.delivered,
+      // Surface the link only when email couldn't be sent (dev / unconfigured SMTP).
+      inviteUrl: sent.delivered ? undefined : link,
+    });
+  }),
+);
+
+/** Edit a user's name, email, or platform role. */
+adminRouter.patch(
+  "/users/:id",
+  validateParams(UserIdParam),
+  validateBody(UserUpdateSchema),
+  asyncHandler(async (req, res) => {
+    const { id } = req.params as z.infer<typeof UserIdParam>;
+    const body = req.body as z.infer<typeof UserUpdateSchema>;
+    const user = await prisma.user.findUnique({ where: { id } });
+    if (!user) throw new NotFoundError("Gebruiker niet gevonden");
+
+    // Demoting the last platform admin would lock everyone out.
+    if (body.platformRole && body.platformRole !== PlatformRole.PLATFORM_ADMIN) {
+      await assertNotLastPlatformAdmin(id);
+    }
+    if (body.email) {
+      const lower = body.email.toLowerCase();
+      const clash = await prisma.user.findUnique({ where: { email: lower } });
+      if (clash && clash.id !== id) throw new ConflictError("E-mailadres al in gebruik");
+    }
+
+    const updated = await prisma.user.update({
+      where: { id },
+      data: {
+        email: body.email?.toLowerCase(),
+        firstName: body.firstName,
+        lastName: body.lastName,
+        platformRole: body.platformRole,
+      },
+      select: {
+        id: true,
+        email: true,
+        firstName: true,
+        lastName: true,
+        platformRole: true,
+        twoFactorEnabled: true,
+        twoFactorRequired: true,
+        createdAt: true,
+        _count: { select: { memberships: true } },
+      },
+    });
+    res.json({
+      user: {
+        id: updated.id,
+        email: updated.email,
+        firstName: updated.firstName,
+        lastName: updated.lastName,
+        platformRole: updated.platformRole,
+        twoFactorEnabled: updated.twoFactorEnabled,
+        twoFactorRequired: updated.twoFactorRequired,
+        createdAt: updated.createdAt,
+        membershipCount: updated._count.memberships,
+      },
+    });
+  }),
+);
+
+/** Delete a user (cannot delete yourself or the last platform admin). */
+adminRouter.delete(
+  "/users/:id",
+  validateParams(UserIdParam),
+  asyncHandler(async (req, res) => {
+    const { id } = req.params as z.infer<typeof UserIdParam>;
+    if (id === req.user!.id) throw new ForbiddenError("Je kunt je eigen account niet verwijderen");
+    const user = await prisma.user.findUnique({ where: { id } });
+    if (!user) throw new NotFoundError("Gebruiker niet gevonden");
+    await assertNotLastPlatformAdmin(id);
+    await prisma.user.delete({ where: { id } });
+    res.status(204).end();
+  }),
+);
+
+/** Send a password-reset email (admin-initiated). */
+adminRouter.post(
+  "/users/:id/reset-password",
+  validateParams(UserIdParam),
+  asyncHandler(async (req, res) => {
+    const { id } = req.params as z.infer<typeof UserIdParam>;
+    const user = await prisma.user.findUnique({ where: { id } });
+    if (!user) throw new NotFoundError("Gebruiker niet gevonden");
+    const rawToken = await createUserToken(user.id, UserTokenKind.PASSWORD_RESET);
+    const link = resetLink(rawToken);
+    const sent = await sendPasswordResetEmail({ to: user.email, firstName: user.firstName, link });
+    res.json({ emailDelivered: sent.delivered, resetUrl: sent.delivered ? undefined : link });
+  }),
+);
+
+/** Require or disable 2FA for a user. */
+const TwoFactorAdminSchema = z.object({
+  action: z.enum(["require", "unrequire", "disable"]),
+});
+
+adminRouter.post(
+  "/users/:id/2fa",
+  validateParams(UserIdParam),
+  validateBody(TwoFactorAdminSchema),
+  asyncHandler(async (req, res) => {
+    const { id } = req.params as z.infer<typeof UserIdParam>;
+    const { action } = req.body as z.infer<typeof TwoFactorAdminSchema>;
+    const user = await prisma.user.findUnique({ where: { id } });
+    if (!user) throw new NotFoundError("Gebruiker niet gevonden");
+
+    const data =
+      action === "require"
+        ? { twoFactorRequired: true }
+        : action === "unrequire"
+          ? { twoFactorRequired: false }
+          : // "disable": fully clear enrollment.
+            { twoFactorRequired: false, twoFactorEnabled: false, twoFactorSecret: null };
+
+    const updated = await prisma.user.update({
+      where: { id },
+      data,
+      select: { id: true, twoFactorEnabled: true, twoFactorRequired: true },
+    });
+
+    // AuditLog is workspace-scoped; attach to the target's (or actor's) first
+    // workspace if one exists, otherwise skip — there's no platform-level log.
+    const wsId = (await firstWorkspaceId(id)) ?? (await firstWorkspaceId(req.user!.id));
+    if (wsId) {
+      await prisma.auditLog.create({
+        data: {
+          workspaceId: wsId,
+          userId: req.user!.id,
+          action: `admin.user.2fa.${action}`,
+          metadata: { targetUserId: id },
+        },
+      });
+    }
+
+    res.json({ user: updated });
+  }),
+);
+
+async function firstWorkspaceId(userId: string): Promise<string | null> {
+  const m = await prisma.membership.findFirst({
+    where: { userId, workspaceId: { not: null } },
+    select: { workspaceId: true },
+  });
+  return m?.workspaceId ?? null;
+}

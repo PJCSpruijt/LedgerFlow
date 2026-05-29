@@ -1,10 +1,12 @@
 import bcrypt from "bcryptjs";
 import jwt, { type SignOptions } from "jsonwebtoken";
 import { createHash, randomBytes } from "node:crypto";
-import { PlatformRole, ScopedRole, ScopeLevel } from "@prisma/client";
+import { PlatformRole, ScopedRole, ScopeLevel, UserTokenKind } from "@prisma/client";
 import { prisma } from "../config/prisma.js";
 import { env } from "../config/env.js";
-import { ConflictError, UnauthorizedError } from "../utils/errors.js";
+import { decryptString } from "../utils/crypto.js";
+import { verifyTotp } from "./totp.service.js";
+import { BadRequestError, ConflictError, UnauthorizedError } from "../utils/errors.js";
 
 const BCRYPT_ROUNDS = 12;
 
@@ -142,15 +144,78 @@ export async function register(input: RegisterInput): Promise<AuthResult> {
   };
 }
 
-export async function login(input: LoginInput): Promise<AuthResult> {
+/** Returned by login() when the account has 2FA enabled: a second step is needed. */
+export interface TwoFactorChallenge {
+  twoFactorRequired: true;
+  challengeToken: string;
+}
+
+export function isTwoFactorChallenge(
+  r: AuthResult | TwoFactorChallenge,
+): r is TwoFactorChallenge {
+  return (r as TwoFactorChallenge).twoFactorRequired === true;
+}
+
+export async function login(input: LoginInput): Promise<AuthResult | TwoFactorChallenge> {
   const user = await prisma.user.findUnique({ where: { email: input.email.toLowerCase() } });
   if (!user) throw new UnauthorizedError("Invalid credentials");
 
   const ok = await bcrypt.compare(input.password, user.passwordHash);
   if (!ok) throw new UnauthorizedError("Invalid credentials");
 
+  // 2FA gate: password verified, but issue no tokens yet — hand back a short-lived
+  // challenge the client exchanges (with a TOTP code) at /auth/login/2fa.
+  if (user.twoFactorEnabled && user.twoFactorSecret) {
+    return { twoFactorRequired: true, challengeToken: signChallengeToken(user.id) };
+  }
+
   const tokens = await issueTokens(user.id, user.email, user.platformRole);
 
+  return {
+    user: {
+      id: user.id,
+      email: user.email,
+      firstName: user.firstName,
+      lastName: user.lastName,
+      platformRole: user.platformRole,
+    },
+    ...tokens,
+  };
+}
+
+const CHALLENGE_TTL = "5m";
+
+function signChallengeToken(userId: string): string {
+  return jwt.sign({ sub: userId, typ: "2fa" }, env.JWT_ACCESS_SECRET, { expiresIn: CHALLENGE_TTL });
+}
+
+function verifyChallengeToken(token: string): string {
+  let decoded: jwt.JwtPayload;
+  try {
+    decoded = jwt.verify(token, env.JWT_ACCESS_SECRET) as jwt.JwtPayload;
+  } catch {
+    throw new UnauthorizedError("Verlopen of ongeldige 2FA-sessie. Log opnieuw in.");
+  }
+  if (decoded.typ !== "2fa" || typeof decoded.sub !== "string") {
+    throw new UnauthorizedError("Ongeldige 2FA-sessie");
+  }
+  return decoded.sub;
+}
+
+/** Second login step: verify the TOTP code against the challenge and issue tokens. */
+export async function loginVerifyTwoFactor(
+  challengeToken: string,
+  code: string,
+): Promise<AuthResult> {
+  const userId = verifyChallengeToken(challengeToken);
+  const user = await prisma.user.findUnique({ where: { id: userId } });
+  if (!user || !user.twoFactorEnabled || !user.twoFactorSecret) {
+    throw new UnauthorizedError("2FA is niet ingeschakeld voor dit account");
+  }
+  if (!verifyTotp(code, decryptString(user.twoFactorSecret))) {
+    throw new UnauthorizedError("Ongeldige verificatiecode");
+  }
+  const tokens = await issueTokens(user.id, user.email, user.platformRole);
   return {
     user: {
       id: user.id,
@@ -211,6 +276,61 @@ export async function logout(rawRefreshToken: string | undefined): Promise<void>
     where: { tokenHash, revokedAt: null },
     data: { revokedAt: new Date() },
   });
+}
+
+/* -------------------------------------------------------------------------- */
+/*  Invitation / password-reset tokens + password setting                     */
+/* -------------------------------------------------------------------------- */
+
+const INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
+const RESET_TTL_MS = 60 * 60 * 1000; // 1 hour
+
+/** Mint a single-use token (returns the RAW value to embed in an email link). */
+export async function createUserToken(userId: string, kind: UserTokenKind): Promise<string> {
+  const raw = randomBytes(32).toString("base64url");
+  const tokenHash = hashRefreshToken(raw);
+  const ttl = kind === UserTokenKind.INVITE ? INVITE_TTL_MS : RESET_TTL_MS;
+  await prisma.userToken.create({
+    data: { userId, kind, tokenHash, expiresAt: new Date(Date.now() + ttl) },
+  });
+  return raw;
+}
+
+/** Atomically consume a single-use token of the expected kind; returns the userId. */
+async function consumeUserToken(rawToken: string, kind: UserTokenKind): Promise<string> {
+  const tokenHash = hashRefreshToken(rawToken);
+  const row = await prisma.userToken.findUnique({ where: { tokenHash } });
+  if (!row || row.kind !== kind || row.usedAt || row.expiresAt < new Date()) {
+    throw new BadRequestError("Ongeldige of verlopen link");
+  }
+  const claimed = await prisma.userToken.updateMany({
+    where: { id: row.id, usedAt: null },
+    data: { usedAt: new Date() },
+  });
+  if (claimed.count !== 1) throw new BadRequestError("Ongeldige of verlopen link");
+  return row.userId;
+}
+
+/** Set a user's password and revoke all their refresh tokens (forces re-login). */
+export async function setUserPassword(userId: string, password: string): Promise<void> {
+  const passwordHash = await bcrypt.hash(password, BCRYPT_ROUNDS);
+  await prisma.$transaction([
+    prisma.user.update({ where: { id: userId }, data: { passwordHash } }),
+    prisma.refreshToken.updateMany({
+      where: { userId, revokedAt: null },
+      data: { revokedAt: new Date() },
+    }),
+  ]);
+}
+
+/** Consume an invite/reset token and set the new password in one step. */
+export async function completePasswordSetup(
+  rawToken: string,
+  kind: UserTokenKind,
+  password: string,
+): Promise<void> {
+  const userId = await consumeUserToken(rawToken, kind);
+  await setUserPassword(userId, password);
 }
 
 export function verifyAccessToken(token: string): {

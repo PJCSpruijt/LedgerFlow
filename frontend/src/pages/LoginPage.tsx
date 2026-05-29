@@ -4,26 +4,86 @@ import { useAuth } from "../contexts/AuthContext";
 import { ApiError } from "../services/api";
 
 export function LoginPage() {
-  const { login } = useAuth();
+  const { login, verifyTwoFactor } = useAuth();
   const nav = useNavigate();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
+  // When set, the password step succeeded and a TOTP code is required.
+  const [challengeToken, setChallengeToken] = useState<string | null>(null);
+  const [code, setCode] = useState("");
+
   const onSubmit = async (e: FormEvent) => {
     e.preventDefault();
     setError(null);
     setSubmitting(true);
     try {
-      await login(email, password);
-      nav("/dashboard");
+      const r = await login(email, password);
+      if (r.twoFactorRequired) {
+        setChallengeToken(r.challengeToken);
+      } else {
+        nav("/dashboard");
+      }
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Inloggen mislukt");
     } finally {
       setSubmitting(false);
     }
   };
+
+  const onVerify = async (e: FormEvent) => {
+    e.preventDefault();
+    setError(null);
+    setSubmitting(true);
+    try {
+      await verifyTwoFactor(challengeToken!, code);
+      nav("/dashboard");
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Verificatie mislukt");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  if (challengeToken) {
+    return (
+      <form onSubmit={onVerify} className="space-y-4">
+        <h2 className="text-xl font-semibold">Tweestapsverificatie</h2>
+        <p className="text-sm text-slate-500">
+          Voer de 6-cijferige code uit je authenticator-app in.
+        </p>
+        <div>
+          <label className="lf-label">Verificatiecode</label>
+          <input
+            className="lf-input tracking-widest text-center"
+            inputMode="numeric"
+            autoFocus
+            maxLength={6}
+            required
+            value={code}
+            onChange={(e) => setCode(e.target.value.replace(/\D/g, ""))}
+          />
+        </div>
+        {error && <div className="text-sm text-red-600">{error}</div>}
+        <button type="submit" className="lf-btn-primary w-full" disabled={submitting}>
+          {submitting ? "Bezig…" : "Verifiëren"}
+        </button>
+        <button
+          type="button"
+          className="lf-link text-sm w-full text-center"
+          onClick={() => {
+            setChallengeToken(null);
+            setCode("");
+            setError(null);
+          }}
+        >
+          Terug
+        </button>
+      </form>
+    );
+  }
 
   return (
     <form onSubmit={onSubmit} className="space-y-4">

@@ -7,12 +7,20 @@ export interface AuthUser {
   firstName?: string;
   lastName?: string;
   platformRole?: "USER" | "PLATFORM_ADMIN";
+  twoFactorEnabled?: boolean;
+  twoFactorRequired?: boolean;
 }
+
+export type LoginResult =
+  | { twoFactorRequired: true; challengeToken: string }
+  | { twoFactorRequired: false };
 
 interface AuthContextValue {
   user: AuthUser | null;
   loading: boolean;
-  login: (email: string, password: string) => Promise<void>;
+  login: (email: string, password: string) => Promise<LoginResult>;
+  verifyTwoFactor: (challengeToken: string, code: string) => Promise<void>;
+  refreshUser: () => Promise<void>;
   register: (input: RegisterInput) => Promise<void>;
   logout: () => Promise<void>;
 }
@@ -58,14 +66,38 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
-  const login = async (email: string, password: string) => {
-    const r = await api<{ user: AuthUser; accessToken: string }>("/auth/login", {
+  const login = async (email: string, password: string): Promise<LoginResult> => {
+    const r = await api<{
+      user?: AuthUser;
+      accessToken?: string;
+      twoFactorRequired?: boolean;
+      challengeToken?: string;
+    }>("/auth/login", {
       method: "POST",
       body: { email, password },
       skipAuth: true,
     });
+    if (r.twoFactorRequired && r.challengeToken) {
+      return { twoFactorRequired: true, challengeToken: r.challengeToken };
+    }
+    tokenStore.accessToken = r.accessToken!;
+    setUser(r.user!);
+    return { twoFactorRequired: false };
+  };
+
+  const verifyTwoFactor = async (challengeToken: string, code: string) => {
+    const r = await api<{ user: AuthUser; accessToken: string }>("/auth/login/2fa", {
+      method: "POST",
+      body: { challengeToken, code },
+      skipAuth: true,
+    });
     tokenStore.accessToken = r.accessToken;
     setUser(r.user);
+  };
+
+  const refreshUser = async () => {
+    const me = await api<{ user: AuthUser }>("/auth/me");
+    setUser(me.user);
   };
 
   const register = async (input: RegisterInput) => {
@@ -90,7 +122,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, register, logout }}>
+    <AuthContext.Provider
+      value={{ user, loading, login, verifyTwoFactor, refreshUser, register, logout }}
+    >
       {children}
     </AuthContext.Provider>
   );

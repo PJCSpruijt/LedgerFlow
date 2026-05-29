@@ -12,6 +12,9 @@ import { YukiPage } from "./pages/YukiPage";
 import { ExportsPage } from "./pages/ExportsPage";
 import { AdminPage } from "./pages/AdminPage";
 import { AdminPlansPage } from "./pages/AdminPlansPage";
+import { AdminUsersPage } from "./pages/AdminUsersPage";
+import { AcceptInvitationPage, ResetPasswordPage } from "./pages/SetPasswordPage";
+import { MandatoryTwoFactorPage } from "./pages/MandatoryTwoFactorPage";
 
 function RequireAuth({ children }: { children: ReactElement }) {
   const { user, loading } = useAuth();
@@ -23,6 +26,18 @@ function RequireAuth({ children }: { children: ReactElement }) {
 function RequirePlatformAdmin({ children }: { children: ReactElement }) {
   const { user } = useAuth();
   if (user?.platformRole !== "PLATFORM_ADMIN") return <Navigate to="/dashboard" replace />;
+  return children;
+}
+
+/**
+ * Hard gate: when an admin has mandated 2FA but the user hasn't enrolled, replace
+ * the entire app with the blocking enrollment screen — nothing else is reachable.
+ */
+function Require2FAEnrollment({ children }: { children: ReactElement }) {
+  const { user } = useAuth();
+  if (user?.twoFactorRequired && !user.twoFactorEnabled) {
+    return <MandatoryTwoFactorPage />;
+  }
   return children;
 }
 
@@ -40,12 +55,16 @@ export function App() {
       <Route element={<AuthLayout />}>
         <Route path="/login" element={<LoginPage />} />
         <Route path="/register" element={<RegisterPage />} />
+        <Route path="/accept-invitation" element={<AcceptInvitationPage />} />
+        <Route path="/reset-password" element={<ResetPasswordPage />} />
       </Route>
 
       <Route
         element={
           <RequireAuth>
-            <AppLayout />
+            <Require2FAEnrollment>
+              <AppLayout />
+            </Require2FAEnrollment>
           </RequireAuth>
         }
       >
@@ -70,6 +89,14 @@ export function App() {
           element={
             <RequirePlatformAdmin>
               <AdminPlansPage />
+            </RequirePlatformAdmin>
+          }
+        />
+        <Route
+          path="/admin/users"
+          element={
+            <RequirePlatformAdmin>
+              <AdminUsersPage />
             </RequirePlatformAdmin>
           }
         />

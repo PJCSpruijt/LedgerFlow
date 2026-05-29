@@ -9,6 +9,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { env } from "./config/env.js";
 import { logger } from "./config/logger.js";
 import { errorHandler, notFoundHandler } from "./middleware/errorHandler.js";
+import { enforceTwoFactorEnrollment } from "./middleware/auth.js";
 
 import { healthRouter } from "./routes/health.js";
 import { authRouter } from "./routes/auth.js";
@@ -65,6 +66,9 @@ export function createApp() {
   // Routes
   app.use("/health", healthRouter);
   app.use("/auth", authRouter);
+  // Hard-block all app APIs for users with admin-mandated-but-not-enrolled 2FA.
+  // (Enrollment lives under /auth, which is mounted above and stays reachable.)
+  app.use("/api", enforceTwoFactorEnrollment);
   app.use("/api/workspaces", workspaceRouter);
   app.use("/api/yuki", yukiRouter);
   app.use("/api/export", exportRouter);

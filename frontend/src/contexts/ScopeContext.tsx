@@ -65,6 +65,13 @@ export function ScopeProvider({ children }: { children: ReactNode }) {
       setLoading(false);
       return;
     }
+    // While the user must still enroll in mandated 2FA, the backend blocks all
+    // /api calls — skip loading the scope tree until enrollment completes.
+    if (user.twoFactorRequired && !user.twoFactorEnabled) {
+      setWorkspaces([]);
+      setLoading(false);
+      return;
+    }
     const r = await api<{ workspaces: WorkspaceNode[] }>("/api/workspaces");
     setWorkspaces(r.workspaces);
     setLoading(false);

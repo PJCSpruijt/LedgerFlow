@@ -1,10 +1,28 @@
 import { Router } from "express";
 import { z } from "zod";
 import rateLimit from "express-rate-limit";
+import { UserTokenKind } from "@prisma/client";
+import { prisma } from "../config/prisma.js";
 import { validateBody } from "../middleware/validate.js";
 import { asyncHandler } from "../middleware/asyncHandler.js";
 import { requireAuth } from "../middleware/auth.js";
-import { login, logout, refresh, register } from "../services/auth.service.js";
+import {
+  completePasswordSetup,
+  isTwoFactorChallenge,
+  login,
+  loginVerifyTwoFactor,
+  logout,
+  refresh,
+  register,
+} from "../services/auth.service.js";
+import {
+  generateTotpSecret,
+  totpKeyUri,
+  totpQrDataUrl,
+  verifyTotp,
+} from "../services/totp.service.js";
+import { encryptString, decryptString } from "../utils/crypto.js";
+import { BadRequestError } from "../utils/errors.js";
 
 export const authRouter = Router();
 
@@ -28,6 +46,18 @@ const LoginSchema = z.object({
   email: z.string().email(),
   password: z.string().min(1),
 });
+
+const TwoFactorLoginSchema = z.object({
+  challengeToken: z.string().min(1),
+  code: z.string().min(6).max(10),
+});
+
+const PasswordSetupSchema = z.object({
+  token: z.string().min(1),
+  password: z.string().min(10, "Wachtwoord moet minstens 10 tekens zijn"),
+});
+
+const CodeSchema = z.object({ code: z.string().min(6).max(10) });
 
 const REFRESH_COOKIE = "lf_refresh";
 const refreshCookieOpts = {
@@ -58,6 +88,25 @@ authRouter.post(
   validateBody(LoginSchema),
   asyncHandler(async (req, res) => {
     const result = await login(req.body);
+    if (isTwoFactorChallenge(result)) {
+      res.json({ twoFactorRequired: true, challengeToken: result.challengeToken });
+      return;
+    }
+    res.cookie(REFRESH_COOKIE, result.refreshToken, refreshCookieOpts);
+    res.json({
+      user: result.user,
+      accessToken: result.accessToken,
+      accessTokenExpiresAt: result.accessTokenExpiresAt,
+    });
+  }),
+);
+
+authRouter.post(
+  "/login/2fa",
+  authLimiter,
+  validateBody(TwoFactorLoginSchema),
+  asyncHandler(async (req, res) => {
+    const result = await loginVerifyTwoFactor(req.body.challengeToken, req.body.code);
     res.cookie(REFRESH_COOKIE, result.refreshToken, refreshCookieOpts);
     res.json({
       user: result.user,
@@ -97,10 +146,109 @@ authRouter.post(
   }),
 );
 
+/** Accept an admin invitation: consume the token and set the initial password. */
+authRouter.post(
+  "/accept-invitation",
+  authLimiter,
+  validateBody(PasswordSetupSchema),
+  asyncHandler(async (req, res) => {
+    await completePasswordSetup(req.body.token, UserTokenKind.INVITE, req.body.password);
+    res.json({ ok: true });
+  }),
+);
+
+/** Complete a password reset: consume the token and set the new password. */
+authRouter.post(
+  "/reset-password",
+  authLimiter,
+  validateBody(PasswordSetupSchema),
+  asyncHandler(async (req, res) => {
+    await completePasswordSetup(req.body.token, UserTokenKind.PASSWORD_RESET, req.body.password);
+    res.json({ ok: true });
+  }),
+);
+
 authRouter.get(
   "/me",
   requireAuth,
   asyncHandler(async (req, res) => {
-    res.json({ user: req.user });
+    const user = await prisma.user.findUnique({
+      where: { id: req.user!.id },
+      select: {
+        id: true,
+        email: true,
+        firstName: true,
+        lastName: true,
+        platformRole: true,
+        twoFactorEnabled: true,
+        twoFactorRequired: true,
+      },
+    });
+    res.json({ user });
+  }),
+);
+
+/* -------------------------------------------------------------------------- */
+/*  Self-service 2FA (TOTP) enrollment                                        */
+/* -------------------------------------------------------------------------- */
+
+/** Begin enrollment: generate (and store, disabled) a secret; return QR + secret. */
+authRouter.post(
+  "/2fa/setup",
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const secret = generateTotpSecret();
+    await prisma.user.update({
+      where: { id: req.user!.id },
+      data: { twoFactorSecret: encryptString(secret), twoFactorEnabled: false },
+    });
+    const otpauthUri = totpKeyUri(req.user!.email, secret);
+    const qrDataUrl = await totpQrDataUrl(otpauthUri);
+    res.json({ secret, otpauthUri, qrDataUrl });
+  }),
+);
+
+/** Confirm enrollment by verifying the first code; flips twoFactorEnabled on. */
+authRouter.post(
+  "/2fa/enable",
+  requireAuth,
+  validateBody(CodeSchema),
+  asyncHandler(async (req, res) => {
+    const user = await prisma.user.findUnique({ where: { id: req.user!.id } });
+    if (!user?.twoFactorSecret) {
+      throw new BadRequestError("Start eerst de 2FA-installatie");
+    }
+    if (!verifyTotp(req.body.code, decryptString(user.twoFactorSecret))) {
+      throw new BadRequestError("Ongeldige verificatiecode");
+    }
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { twoFactorEnabled: true },
+    });
+    res.json({ ok: true, twoFactorEnabled: true });
+  }),
+);
+
+/** Disable 2FA (requires a valid code). Blocked when an admin has required 2FA. */
+authRouter.post(
+  "/2fa/disable",
+  requireAuth,
+  validateBody(CodeSchema),
+  asyncHandler(async (req, res) => {
+    const user = await prisma.user.findUnique({ where: { id: req.user!.id } });
+    if (!user?.twoFactorEnabled || !user.twoFactorSecret) {
+      throw new BadRequestError("2FA is niet ingeschakeld");
+    }
+    if (user.twoFactorRequired) {
+      throw new BadRequestError("Je beheerder heeft 2FA verplicht; je kunt het niet uitschakelen.");
+    }
+    if (!verifyTotp(req.body.code, decryptString(user.twoFactorSecret))) {
+      throw new BadRequestError("Ongeldige verificatiecode");
+    }
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { twoFactorEnabled: false, twoFactorSecret: null },
+    });
+    res.json({ ok: true, twoFactorEnabled: false });
   }),
 );

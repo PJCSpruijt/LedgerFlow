@@ -2,7 +2,11 @@ import type { RequestHandler } from "express";
 import { PlatformRole, ScopedRole, ScopeLevel } from "@prisma/client";
 import { prisma } from "../config/prisma.js";
 import { verifyAccessToken } from "../services/auth.service.js";
-import { ForbiddenError, UnauthorizedError } from "../utils/errors.js";
+import {
+  ForbiddenError,
+  TwoFactorEnrollmentRequiredError,
+  UnauthorizedError,
+} from "../utils/errors.js";
 
 /** True when the request is made by the platform superuser. */
 export function isPlatformAdmin(req: { user?: Express.UserContext }): boolean {
@@ -25,6 +29,37 @@ export const requireAuth: RequestHandler = (req, _res, next) => {
 export const requirePlatformAdmin: RequestHandler = (req, _res, next) => {
   if (!isPlatformAdmin(req)) return next(new ForbiddenError("Platform admin only"));
   next();
+};
+
+/**
+ * Hard-enforce admin-mandated 2FA: if the bearer's user has twoFactorRequired
+ * but hasn't enrolled (twoFactorEnabled=false), block the request so the only
+ * thing they can do is enroll. Mounted on /api (the 2FA enrollment endpoints
+ * live under /auth, so they stay reachable). Requests without a valid bearer are
+ * passed through untouched — the route's own requireAuth handles the 401.
+ */
+export const enforceTwoFactorEnrollment: RequestHandler = async (req, _res, next) => {
+  try {
+    const header = req.header("authorization") ?? "";
+    const [scheme, token] = header.split(" ");
+    if (scheme?.toLowerCase() !== "bearer" || !token) return next();
+    let userId: string;
+    try {
+      userId = verifyAccessToken(token).sub;
+    } catch {
+      return next();
+    }
+    const u = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { twoFactorRequired: true, twoFactorEnabled: true },
+    });
+    if (u && u.twoFactorRequired && !u.twoFactorEnabled) {
+      return next(new TwoFactorEnrollmentRequiredError());
+    }
+    next();
+  } catch (err) {
+    next(err);
+  }
 };
 
 // Most-privileged first. Used only to pick the single role we surface for display;

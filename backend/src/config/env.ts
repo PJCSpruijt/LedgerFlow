@@ -22,6 +22,26 @@ const EnvSchema = z.object({
 
   CORS_ORIGIN: z.string().default("http://localhost:5173"),
 
+  // Public base URL of the frontend, used to build invitation / password-reset
+  // links in emails.
+  APP_BASE_URL: z.string().url().default("http://localhost:5173"),
+
+  // 2FA (TOTP) issuer label shown in authenticator apps.
+  TOTP_ISSUER: z.string().default("LedgerFlow"),
+
+  // Outbound email (SMTP). When SMTP_HOST is empty the email service runs in
+  // "dev" mode: it logs the message + returns the link instead of sending.
+  EMAIL_FROM: z.string().default("LedgerFlow <no-reply@ledgerflow.local>"),
+  SMTP_HOST: z.string().default(""),
+  SMTP_PORT: z.coerce.number().int().positive().default(587),
+  SMTP_USER: z.string().default(""),
+  SMTP_PASS: z.string().default(""),
+  // Parse a few truthy spellings; default false (STARTTLS on 587).
+  SMTP_SECURE: z
+    .string()
+    .default("false")
+    .transform((v) => v === "true" || v === "1" || v === "yes"),
+
   CONNECTOR_MODE: z.enum(["mock", "yuki"]).default("mock"),
 
   STRIPE_SECRET_KEY: z.string().default("sk_test_placeholder"),

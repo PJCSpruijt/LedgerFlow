@@ -14,6 +14,7 @@ const navItems = [
 
 const adminNavItems = [
   { to: "/admin", label: "Beheer" },
+  { to: "/admin/users", label: "Gebruikers" },
   { to: "/admin/plans", label: "Abonnementen" },
 ];
 
@@ -54,6 +55,7 @@ export function AppLayout() {
             <NavLink
               key={item.to}
               to={item.to}
+              end
               className={({ isActive }) =>
                 `block rounded-md px-3 py-2 text-sm font-medium ${
                   isActive

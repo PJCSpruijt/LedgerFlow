@@ -64,6 +64,17 @@ export class ModuleRequiredError extends AppError {
   }
 }
 
+/**
+ * The user's account has 2FA mandated by an admin but hasn't completed
+ * enrollment yet. All app APIs are blocked until they enable 2FA; the client
+ * should route them to the mandatory enrollment screen.
+ */
+export class TwoFactorEnrollmentRequiredError extends AppError {
+  constructor(message = "2FA-instelling vereist voordat je verder kunt") {
+    super(403, "TWO_FACTOR_ENROLLMENT_REQUIRED", message);
+  }
+}
+
 export class ConnectorError extends AppError {
   constructor(message = "Connector error", details?: unknown) {
     super(502, "CONNECTOR_ERROR", message, details);

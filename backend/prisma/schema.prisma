@@ -27,14 +27,43 @@ model User {
   firstName     String
   lastName      String
   platformRole  PlatformRole @default(USER)
+  // 2FA (TOTP). The secret is AES-256-GCM encrypted at rest (utils/crypto).
+  // `enabled` = enrollment confirmed (challenged at login); `required` = an
+  // admin mandated 2FA for this user (must enroll).
+  twoFactorEnabled  Boolean @default(false)
+  twoFactorRequired Boolean @default(false)
+  twoFactorSecret   String?
   createdAt     DateTime     @default(now())
   updatedAt     DateTime     @updatedAt
 
   memberships   Membership[]
   refreshTokens RefreshToken[]
   auditLogs     AuditLog[]
+  userTokens    UserToken[]
 
   @@index([email])
+}
+
+// Single-use tokens for admin-initiated invitations and password resets. Only a
+// SHA-256 hash of the raw token is stored; the raw value lives only in the email
+// link. Consumed exactly once (usedAt) before its expiry.
+enum UserTokenKind {
+  INVITE
+  PASSWORD_RESET
+}
+
+model UserToken {
+  id        String        @id @default(uuid())
+  userId    String
+  kind      UserTokenKind
+  tokenHash String        @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime      @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
 }
 
 // A Workspace is the commercial tenant (billing lives here). COMPANY = a single
