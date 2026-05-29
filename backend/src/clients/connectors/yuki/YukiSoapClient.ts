@@ -44,6 +44,17 @@ const xmlParser = new XMLParser({
   // Without this, GL codes like "01250" lose their leading zero (parsed as 1250),
   // which breaks the code→name join with the trial balance for ~20% of accounts.
   numberParseOptions: { leadingZeros: false, hex: false },
+  // fast-xml-parser's default entity-expansion guard (maxTotalExpansions 1000)
+  // is a billion-laughs DoS protection meant for untrusted XML. Yuki responses
+  // are first-party (TLS) and legitimately contain thousands of predefined
+  // character references — every "\r\n" in a transaction description arrives as
+  // &#xD;&#xA; — so a busy period trips the cap and throws. Raise the limits well
+  // past any realistic response size; there are no custom DOCTYPE entities here.
+  processEntities: {
+    maxTotalExpansions: 50_000_000,
+    maxEntityCount: 50_000_000,
+    maxExpandedLength: 500_000_000,
+  },
 });
 
 export interface YukiSoapOptions {

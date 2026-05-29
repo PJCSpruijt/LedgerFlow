@@ -223,14 +223,15 @@ export class YukiConnector implements Connector {
   }
 
   /**
-   * Transactions via Accounting.GLAccountTransactions(sessionID, administrationID, StartDate, EndDate).
+   * Transactions via AccountingInfo.GetTransactionDetails(sessionID,
+   * administrationID, GLAccountCode, StartDate, EndDate, financialMode) — see
+   * fetchTransactionsChunk for why this method (it carries documentReference /
+   * documentType, which GLAccountTransactions does not).
    *
-   * Splits the request into MONTHLY chunks because fast-xml-parser has a
-   * hardcoded 1000-entity safety limit (billion-laughs protection) that
-   * can't be disabled in v4.x. A Yuki transaction description is packed with
-   * encoded entities (&lt;br&gt;, &amp;, &apos;…), so a multi-year query blows
-   * past the limit. Per-month responses stay comfortably under it; the
-   * sessionID is cached so the extra HTTP calls only cost one round-trip each.
+   * Splits the request into MONTHLY chunks to keep each response small: a
+   * multi-year pull would return a very large payload and risk Yuki-side
+   * timeouts. The sessionID is cached so the extra HTTP calls only cost one
+   * round-trip each.
    */
   async getTransactions(range: DateRange): Promise<TransactionLine[]> {
     // Fire the enrichment lookup in parallel with transaction chunks. The map
@@ -354,33 +355,37 @@ export class YukiConnector implements Connector {
 
   private async fetchTransactionsChunk(range: DateRange): Promise<TransactionLine[]> {
     const sessionId = await this.session();
+    // AccountingInfo.GetTransactionDetails exposes the source-document number
+    // (documentReference) and document kind (documentType) that the older
+    // Accounting.GLAccountTransactions method omits. Params:
+    //  - GLAccountCode: empty → every GL account
+    //  - financialMode: INTEGER flag (0 = include everything); a boolean string
+    //    here triggers a .NET "Input string was not in a correct format" fault.
     const body =
-      `<GLAccountTransactions xmlns="${NAMESPACE}">` +
+      `<GetTransactionDetails xmlns="${NAMESPACE}">` +
       `<sessionID>${escapeXml(sessionId)}</sessionID>` +
       `<administrationID>${escapeXml(this.creds.administrationId)}</administrationID>` +
+      `<GLAccountCode></GLAccountCode>` +
       `<StartDate>${escapeXml(range.from)}</StartDate>` +
       `<EndDate>${escapeXml(range.to)}</EndDate>` +
-      `</GLAccountTransactions>`;
+      `<financialMode>0</financialMode>` +
+      `</GetTransactionDetails>`;
 
     const env = await this.soap.call({
       bodyXml: body,
-      method: "GLAccountTransactions",
-      service: "Accounting",
+      method: "GetTransactionDetails",
+      service: "AccountingInfo",
     });
 
+    // Unlike most AccountingInfo methods, GetTransactionDetails returns inline
+    // XML elements (not a CDATA-wrapped embedded document), so the SOAP client's
+    // own parser has already expanded it: result = { TransactionInfo: [...] }.
     const result =
-      (env as { GLAccountTransactionsResponse?: { GLAccountTransactionsResult?: unknown } })
-        ?.GLAccountTransactionsResponse?.GLAccountTransactionsResult;
-    const inner = parseEmbeddedXml(result);
-
-    const rawRows: unknown =
-      inner?.GLAccountTransactions?.GLAccountTransaction ??
-      inner?.Transactions?.Transaction ??
-      inner?.ArrayOfTransaction?.Transaction ??
-      inner?.Transaction ??
-      [];
-    // fast-xml-parser's isArray hint isn't always honored inside embedded XML;
-    // when a chunk has exactly one transaction, we get an object instead of [].
+      (env as { GetTransactionDetailsResponse?: { GetTransactionDetailsResult?: unknown } })
+        ?.GetTransactionDetailsResponse?.GetTransactionDetailsResult;
+    const rawRows: unknown = (result as { TransactionInfo?: unknown })?.TransactionInfo;
+    // The SOAP parser has no isArray hint for TransactionInfo, so a single-row
+    // month arrives as an object instead of a one-element array.
     const rows: Array<Record<string, unknown>> = Array.isArray(rawRows)
       ? (rawRows as Array<Record<string, unknown>>)
       : rawRows && typeof rawRows === "object"
@@ -388,24 +393,28 @@ export class YukiConnector implements Connector {
         : [];
 
     return rows.map((r) => {
-      const date = str(r.Date ?? r.EntryDate ?? r.TransactionDate).slice(0, 10);
-      const amount = num(r.Amount ?? r.AmountDC ?? r.Bedrag);
-      // Yuki's GLAccountTransactions response does NOT include GL account name or
-      // balance type — only the code. The export sheet shows code only;
-      // name/type can later be enriched by joining with the trial balance call.
-      const contact = r.Contact ?? r.ContactName;
+      const date = str(r.transactionDate).slice(0, 10);
+      // documentReference is 0 for entries without a source document (bank,
+      // memorial); treat that as "no reference".
+      const ref = num(r.documentReference);
+      // documentType arrives with a "TRM" prefix (e.g. "TRMPurchase invoice").
+      const rawType = str(r.documentType).replace(/^TRM/, "").trim();
       return {
         date,
         year: Number(date.slice(0, 4)) || 0,
         period: Number(date.slice(5, 7)) || 0,
-        glAccountCode: str(r.GLAccountCode ?? r.Code ?? r.AccountCode),
+        glAccountCode: str(r.glAccountCode),
         glAccountName: "",
-        accountType: "UNKNOWN",
-        amount,
-        contactName: contact ? str(contact) : null,
-        reference: r.Reference ? str(r.Reference) : null,
-        description: str(r.Description ?? r.Omschrijving),
-        currency: str(r.Currency) || "EUR",
+        accountType: "UNKNOWN" as const,
+        amount: num(r.transactionAmount),
+        contactName: r.fullName ? str(r.fullName) : null,
+        reference: ref ? String(ref) : null,
+        documentType: rawType || null,
+        // GetTransactionDetails has no project field; left null so the export
+        // renders an empty "Projecten" column (ready for connectors that do).
+        project: null,
+        description: str(r.description),
+        currency: str(r.currency) || "EUR",
       };
     });
   }

@@ -32,7 +32,12 @@ export interface TransactionLine {
   accountType: "BALANCE" | "PROFIT_LOSS" | "UNKNOWN";
   amount: number; // signed; negative = credit
   contactName: string | null;
+  /** Source document number (purchase/sales invoice number). Null for entries without a document. */
   reference: string | null;
+  /** Source document kind, connector-native label (e.g. "Purchase invoice"). Null when unknown. */
+  documentType: string | null;
+  /** Project tag. Null when the connector/administration has no project on the line. */
+  project: string | null;
   description: string;
   currency: string;
 }

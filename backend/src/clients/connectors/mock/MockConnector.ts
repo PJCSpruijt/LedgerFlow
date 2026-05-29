@@ -59,6 +59,8 @@ export class MockConnector implements Connector {
       amount,
       contactName: contact,
       reference: null,
+      documentType: null,
+      project: null,
       description,
       currency: "EUR",
     });
