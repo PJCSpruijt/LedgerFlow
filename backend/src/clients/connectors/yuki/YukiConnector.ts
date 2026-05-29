@@ -412,6 +412,9 @@ export class YukiConnector implements Connector {
         contactName: r.fullName ? str(r.fullName) : null,
         reference: ref ? String(ref) : null,
         documentType: rawType || null,
+        // Invoice transactions have a retrievable PDF via GetTransactionDocument
+        // (keyed on the transaction id). Non-invoice entries have no document.
+        documentId: /invoice/i.test(rawType) && r.id ? str(r.id) : null,
         // GetTransactionDetails has no project field; left null so the export
         // renders an empty "Projecten" column (ready for connectors that do).
         project: null,

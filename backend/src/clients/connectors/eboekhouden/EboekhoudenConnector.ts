@@ -316,6 +316,13 @@ export class EboekhoudenConnector implements Connector {
           // (negative = credit), matching the Yuki connector.
           const headerAmount = Number(m.amount) || 0;
           const rowSign = headerAmount >= 0 ? -1 : 1;
+          // No transaction-level PDF link for e-Boekhouden: invoice PDFs live only
+          // in the Facturatie (billing) module, keyed by its OWN numbering
+          // (e.g. "F26001"). Booked sales mutations reference external invoice
+          // numbers (e.g. "2025-0030" from the webshop) that never match the
+          // billing module — verified live: 0/7 sales refs overlapped the billing
+          // list. Setting documentId here would only yield dead "no PDF" links.
+          const pdfRef: string | null = null;
           out.push({
             date,
             year,
@@ -331,6 +338,7 @@ export class EboekhoudenConnector implements Connector {
                 ? String(m.invoiceNumber)
                 : null,
             documentType,
+            documentId: pdfRef,
             project: null,
             description: String(det.description ?? ""),
             currency: "EUR",
@@ -353,6 +361,7 @@ export class EboekhoudenConnector implements Connector {
                   ? String(det.invoiceNumber)
                   : null,
               documentType,
+              documentId: pdfRef,
               project: null,
               description: String(row.description ?? det.description ?? ""),
               currency: "EUR",
@@ -408,6 +417,7 @@ export class EboekhoudenConnector implements Connector {
         contactName: null,
         reference: m.invoiceNumber ? String(m.invoiceNumber) : null,
         documentType,
+        documentId: null, // see note above: no mutation→PDF link for e-Boekhouden
         project: null,
         description: documentType ?? "",
         currency: "EUR",

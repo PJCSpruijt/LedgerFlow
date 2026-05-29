@@ -1,4 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
+import { useNavigate } from "react-router-dom";
 import { useScope } from "../contexts/ScopeContext";
 import { api, ApiError } from "../services/api";
 import { formatMoney } from "../lib/period";
@@ -15,6 +16,7 @@ interface TbLine {
 
 export function GeneralLedgerPage() {
   const { entity, dateFrom, dateTo, currency } = useScope();
+  const navigate = useNavigate();
   const range = { from: dateFrom, to: dateTo };
 
   const { data, isLoading, isError, error } = useQuery({
@@ -62,7 +64,14 @@ export function GeneralLedgerPage() {
               </thead>
               <tbody>
                 {rows.map((r, i) => (
-                  <tr key={i} className="border-b border-slate-100">
+                  <tr
+                    key={i}
+                    className="border-b border-slate-100 cursor-pointer hover:bg-slate-50"
+                    title="Bekijk transacties van deze grootboekrekening"
+                    onClick={() =>
+                      navigate(`/data/transactions?code=${encodeURIComponent(r.glAccountCode)}`)
+                    }
+                  >
                     <td className="py-1.5 pr-4 font-mono">{r.glAccountCode}</td>
                     <td className="py-1.5 pr-4">{r.glAccountName}</td>
                     <td className="py-1.5 pr-4 text-slate-600">

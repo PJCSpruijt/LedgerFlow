@@ -36,6 +36,8 @@ export interface TransactionLine {
   reference: string | null;
   /** Source document kind, connector-native label (e.g. "Purchase invoice"). Null when unknown. */
   documentType: string | null;
+  /** Opaque ref to fetch this line's invoice PDF via getInvoicePdf(); null if none. */
+  documentId?: string | null;
   /** Project tag. Null when the connector/administration has no project on the line. */
   project: string | null;
   description: string;

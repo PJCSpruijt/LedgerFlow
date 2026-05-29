@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useScope } from "../contexts/ScopeContext";
 import { api, ApiError } from "../services/api";
 import { formatMoney } from "../lib/period";
+import { usePdfModal } from "../components/PdfModal";
 
 interface Item {
   relationId: string;
@@ -51,38 +52,7 @@ interface Group {
 export function OutstandingView({ kind }: { kind: "debtor" | "creditor" }) {
   const { entity, currency } = useScope();
   const [open, setOpen] = useState<Set<string>>(new Set());
-  const [pdf, setPdf] = useState<{ url: string; name: string } | null>(null);
-  const [pdfLoading, setPdfLoading] = useState(false);
-  const [pdfError, setPdfError] = useState<string | null>(null);
-
-  const openPdf = async (it: Item) => {
-    if (!it.documentId) return;
-    setPdfError(null);
-    setPdf(null);
-    setPdfLoading(true);
-    try {
-      const res = await api<Response>(
-        `/api/yuki/invoice-pdf?ref=${encodeURIComponent(it.documentId)}`,
-        { raw: true },
-      );
-      if (!res.ok) {
-        setPdfError("Geen PDF beschikbaar voor deze factuur.");
-        return;
-      }
-      const url = URL.createObjectURL(await res.blob());
-      setPdf({ url, name: it.invoiceNumber ?? "factuur" });
-    } catch {
-      setPdfError("Kon de factuur niet ophalen.");
-    } finally {
-      setPdfLoading(false);
-    }
-  };
-  const closePdf = () => {
-    if (pdf) URL.revokeObjectURL(pdf.url);
-    setPdf(null);
-    setPdfError(null);
-    setPdfLoading(false);
-  };
+  const pdfModal = usePdfModal();
 
   const { data, isLoading, isError, error } = useQuery({
     queryKey: ["outstanding", kind, entity?.id],
@@ -128,36 +98,7 @@ export function OutstandingView({ kind }: { kind: "debtor" | "creditor" }) {
 
   return (
     <div className="space-y-4">
-      {(pdf || pdfLoading || pdfError) && (
-        <div
-          className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4"
-          onClick={closePdf}
-        >
-          <div
-            className="bg-white rounded-lg shadow-xl w-full max-w-4xl h-[85vh] flex flex-col"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-center justify-between px-4 py-2 border-b border-slate-200">
-              <div className="font-medium text-sm">{pdf?.name ?? "Factuur"}</div>
-              <div className="flex items-center gap-3">
-                {pdf && (
-                  <a href={pdf.url} download={`${pdf.name}.pdf`} className="lf-link text-sm">
-                    Download
-                  </a>
-                )}
-                <button className="lf-btn-secondary text-xs" onClick={closePdf}>
-                  Terug
-                </button>
-              </div>
-            </div>
-            <div className="flex-1 min-h-0 bg-slate-100">
-              {pdfLoading && <div className="p-6 text-slate-500">Factuur laden…</div>}
-              {pdfError && <div className="p-6 text-sm text-red-600">{pdfError}</div>}
-              {pdf && <iframe title="factuur" src={pdf.url} className="w-full h-full border-0" />}
-            </div>
-          </div>
-        </div>
-      )}
+      {pdfModal.element}
 
       <div>
         <h1 className="text-2xl font-semibold">{title}</h1>
@@ -251,7 +192,9 @@ export function OutstandingView({ kind }: { kind: "debtor" | "creditor" }) {
                                             <button
                                               className="lf-link"
                                               title="Bekijk factuur (PDF)"
-                                              onClick={() => openPdf(it)}
+                                              onClick={() =>
+                                                pdfModal.open(it.documentId!, it.invoiceNumber ?? "factuur")
+                                              }
                                             >
                                               {it.invoiceNumber ?? "—"}
                                             </button>
