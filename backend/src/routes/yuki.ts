@@ -13,7 +13,6 @@ import {
 import { requireActiveSubscription } from "../middleware/subscription.js";
 import { getConnectorForEntity } from "../clients/connectors/registry.js";
 import { applyVatMappings } from "../services/vat-mapping.service.js";
-import { YukiConnector } from "../clients/connectors/yuki/YukiConnector.js";
 import { ConnectionKind } from "@prisma/client";
 import { BadRequestError } from "../utils/errors.js";
 
@@ -75,13 +74,17 @@ yukiRouter.put(
       },
     });
 
-    // Best-effort: adopt the administration's name from Yuki so the entity shows
-    // a recognizable label. (e-Boekhouden's name endpoint is accountant-only, so
-    // we skip it there.) Any hiccup here must not fail the save.
+    // Best-effort: adopt the administration's name from the connector so the
+    // entity shows a recognizable label instead of a placeholder. Works for any
+    // connector exposing getAdministrationName(); resolves to null (no change)
+    // when the source can't unambiguously name the administration. Any hiccup
+    // here must not fail the save.
     let administrationName: string | null = null;
     try {
-      const connector = await getConnectorForEntity(entityId);
-      if (connector instanceof YukiConnector) {
+      const connector = (await getConnectorForEntity(entityId)) as {
+        getAdministrationName?: () => Promise<string | null>;
+      };
+      if (typeof connector.getAdministrationName === "function") {
         administrationName = await connector.getAdministrationName();
         if (administrationName) {
           await prisma.entity.update({ where: { id: entityId }, data: { name: administrationName } });

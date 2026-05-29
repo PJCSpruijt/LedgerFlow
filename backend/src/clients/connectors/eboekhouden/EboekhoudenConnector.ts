@@ -207,6 +207,36 @@ export class EboekhoudenConnector implements Connector {
     }
   }
 
+  /**
+   * Resolve the administration's company name for display. e-Boekhouden API
+   * tokens are per-administration, so /v1/administration returns this token's
+   * company. For office/accountant tokens linked to multiple administrations the
+   * REST API exposes no administration selector and no explicit "default" flag,
+   * and data calls operate on the account's primary administration — so we take
+   * the FIRST linked administration as the default rather than returning nothing.
+   */
+  async getAdministrationName(): Promise<string | null> {
+    const pickDefault = (items?: { company?: string }[]): string | null => {
+      if (!items || items.length === 0) return null;
+      return (items[0]?.company ?? "").trim() || null; // first = default/primary
+    };
+    try {
+      const r = await this.client.get<{ items?: { company?: string }[] }>("/v1/administration");
+      const name = pickDefault(r.items);
+      if (name) return name;
+    } catch {
+      /* accountant-only on office tokens — fall through to linked */
+    }
+    try {
+      const r = await this.client.get<{ items?: { company?: string }[] }>(
+        "/v1/administration/linked",
+      );
+      return pickDefault(r.items);
+    } catch {
+      return null;
+    }
+  }
+
   async testConnection(): Promise<ConnectionTestResult> {
     try {
       await this.client.get<ListResponse<LedgerRow>>("/v1/ledger", { limit: 1 });
