@@ -5,6 +5,8 @@ import { ExportsPage } from "../pages/ExportsPage";
 import { VatMappingPage } from "../pages/VatMappingPage";
 import { TransactionsPage } from "../pages/TransactionsPage";
 import { GeneralLedgerPage } from "../pages/GeneralLedgerPage";
+import { RelationsView } from "../pages/RelationsPage";
+import { FinancialStatementsPage } from "../pages/FinancialStatementsPage";
 import { BillingPage } from "../pages/BillingPage";
 import { SettingsPage } from "../pages/SettingsPage";
 import { AdminPage } from "../pages/AdminPage";
@@ -62,9 +64,9 @@ export const MODULES: ModuleDef[] = [
       { path: "entities", label: "Entities", element: soon("Entities") },
       { path: "transactions", label: "Transactions", element: <TransactionsPage /> },
       { path: "general-ledger", label: "General Ledger", element: <GeneralLedgerPage /> },
-      { path: "receivables", label: "Receivables", element: soon("Receivables") },
-      { path: "payables", label: "Payables", element: soon("Payables") },
-      { path: "relations", label: "Relations", element: soon("Relations") },
+      { path: "receivables", label: "Receivables", element: <RelationsView mode="receivables" /> },
+      { path: "payables", label: "Payables", element: <RelationsView mode="payables" /> },
+      { path: "relations", label: "Relations", element: <RelationsView mode="all" /> },
       { path: "source-documents", label: "Source Documents", element: soon("Source Documents") },
       { path: "sync-history", label: "Sync History", element: soon("Sync History") },
       { path: "raw-explorer", label: "Raw Data Explorer", element: soon("Raw Data Explorer") },
@@ -112,7 +114,7 @@ export const MODULES: ModuleDef[] = [
     icon: "📊",
     subpages: [
       { path: "downloads", label: "Downloads", element: <ExportsPage /> },
-      { path: "financial-statements", label: "Financial Statements", element: soon("Financial Statements") },
+      { path: "financial-statements", label: "Financial Statements", element: <FinancialStatementsPage /> },
       { path: "management", label: "Management Reports", element: soon("Management Reports") },
       { path: "cashflow", label: "Cashflow", element: soon("Cashflow") },
       { path: "kpi", label: "KPI Dashboards", element: soon("KPI Dashboards") },
