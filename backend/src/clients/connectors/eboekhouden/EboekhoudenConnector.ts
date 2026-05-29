@@ -278,8 +278,9 @@ export class EboekhoudenConnector implements Connector {
     let offset = 0;
     for (;;) {
       const page = await this.client.get<ListResponse<MutationListItem>>("/v1/mutation", {
-        "date[gte]": range.from,
-        "date[lte]": range.to,
+        // e-Boekhouden ignores date[gte]; only date[range]=from,to filters both
+        // bounds correctly.
+        "date[range]": `${range.from},${range.to}`,
         limit: PAGE,
         offset,
       });

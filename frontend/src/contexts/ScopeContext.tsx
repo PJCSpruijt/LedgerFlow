@@ -59,23 +59,24 @@ interface ScopeContextValue {
   entity: EntityNode | null;
   /** Effective role at the deepest selected level. */
   role: ScopedRole | null;
-  // Reporting context (top bar). Not yet wired into data fetching (step 2).
-  period: string; // "YYYY-MM"
+  // Reporting context (top bar): a cumulative from/to date range + currency/view.
+  dateFrom: string; // "YYYY-MM-DD"
+  dateTo: string; // "YYYY-MM-DD"
   currency: string;
   view: ViewType;
   selectWorkspace: (id: string) => void;
   selectGroup: (id: string | null) => void;
   selectEntity: (id: string | null) => void;
-  setPeriod: (p: string) => void;
+  setDateRange: (from: string, to: string) => void;
   setCurrency: (c: string) => void;
   setView: (v: ViewType) => void;
   reload: () => Promise<void>;
 }
 
-const CTX_LS = { period: "fh_period", currency: "fh_currency", view: "fh_view" };
-function defaultPeriod(): string {
+const CTX_LS = { from: "fh_from", to: "fh_to", currency: "fh_currency", view: "fh_view" };
+function defaultRange(): { from: string; to: string } {
   const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+  return { from: `${d.getFullYear()}-01-01`, to: d.toISOString().slice(0, 10) };
 }
 
 const Ctx = createContext<ScopeContextValue | null>(null);
@@ -87,8 +88,11 @@ export function ScopeProvider({ children }: { children: ReactNode }) {
   const [workspaceId, setWorkspaceId] = useState<string | null>(scopeStore.workspaceId);
   const [groupId, setGroupId] = useState<string | null>(scopeStore.groupId);
   const [entityId, setEntityId] = useState<string | null>(scopeStore.entityId);
-  const [period, setPeriodState] = useState<string>(
-    () => localStorage.getItem(CTX_LS.period) ?? defaultPeriod(),
+  const [dateFrom, setFromState] = useState<string>(
+    () => localStorage.getItem(CTX_LS.from) ?? defaultRange().from,
+  );
+  const [dateTo, setToState] = useState<string>(
+    () => localStorage.getItem(CTX_LS.to) ?? defaultRange().to,
   );
   const [currency, setCurrencyState] = useState<string>(
     () => localStorage.getItem(CTX_LS.currency) ?? "EUR",
@@ -96,9 +100,11 @@ export function ScopeProvider({ children }: { children: ReactNode }) {
   const [view, setViewState] = useState<ViewType>(
     () => (localStorage.getItem(CTX_LS.view) as ViewType) ?? "normalized",
   );
-  const setPeriod = (p: string) => {
-    localStorage.setItem(CTX_LS.period, p);
-    setPeriodState(p);
+  const setDateRange = (from: string, to: string) => {
+    localStorage.setItem(CTX_LS.from, from);
+    localStorage.setItem(CTX_LS.to, to);
+    setFromState(from);
+    setToState(to);
   };
   const setCurrency = (c: string) => {
     localStorage.setItem(CTX_LS.currency, c);
@@ -194,13 +200,14 @@ export function ScopeProvider({ children }: { children: ReactNode }) {
         group,
         entity,
         role,
-        period,
+        dateFrom,
+        dateTo,
         currency,
         view,
         selectWorkspace,
         selectGroup,
         selectEntity,
-        setPeriod,
+        setDateRange,
         setCurrency,
         setView,
         reload,

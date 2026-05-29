@@ -23,13 +23,14 @@ export function AppShell() {
     workspace,
     group,
     entity,
-    period,
+    dateFrom,
+    dateTo,
     currency,
     view,
     selectWorkspace,
     selectGroup,
     selectEntity,
-    setPeriod,
+    setDateRange,
     setCurrency,
     setView,
     reload,
@@ -124,13 +125,23 @@ export function AppShell() {
         )}
 
         <div className="ml-auto flex items-center gap-2">
-          <input
-            type="month"
-            className="lf-input text-xs h-9 py-0 w-32"
-            value={period}
-            onChange={(e) => setPeriod(e.target.value)}
-            title="Periode"
-          />
+          <div className="flex items-center gap-1" title="Periode (van / tot)">
+            <input
+              type="date"
+              className="lf-input text-xs h-9 py-0 w-36"
+              value={dateFrom}
+              max={dateTo}
+              onChange={(e) => setDateRange(e.target.value, dateTo)}
+            />
+            <span className="text-slate-400 text-xs">—</span>
+            <input
+              type="date"
+              className="lf-input text-xs h-9 py-0 w-36"
+              value={dateTo}
+              min={dateFrom}
+              onChange={(e) => setDateRange(dateFrom, e.target.value)}
+            />
+          </div>
           <select
             className="lf-input text-xs h-9 py-0 w-20"
             value={currency}

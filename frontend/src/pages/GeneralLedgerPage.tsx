@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useScope } from "../contexts/ScopeContext";
 import { api, ApiError } from "../services/api";
-import { periodToRange, formatMoney } from "../lib/period";
+import { formatMoney } from "../lib/period";
 
 interface TbLine {
   glAccountCode: string;
@@ -14,8 +14,8 @@ interface TbLine {
 }
 
 export function GeneralLedgerPage() {
-  const { entity, period, currency } = useScope();
-  const range = periodToRange(period);
+  const { entity, dateFrom, dateTo, currency } = useScope();
+  const range = { from: dateFrom, to: dateTo };
 
   const { data, isLoading, isError, error } = useQuery({
     queryKey: ["trial-balance", entity?.id, range.from, range.to],

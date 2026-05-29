@@ -16,13 +16,14 @@ export function useContextUrlSync(): void {
     workspace,
     group,
     entity,
-    period,
+    dateFrom,
+    dateTo,
     currency,
     view,
     selectWorkspace,
     selectGroup,
     selectEntity,
-    setPeriod,
+    setDateRange,
     setCurrency,
     setView,
   } = useScope();
@@ -38,8 +39,9 @@ export function useContextUrlSync(): void {
     if (grp) selectGroup(grp);
     const ent = sp.get("ent");
     if (ent) selectEntity(ent);
-    const p = sp.get("period");
-    if (p) setPeriod(p);
+    const from = sp.get("from");
+    const to = sp.get("to");
+    if (from || to) setDateRange(from ?? dateFrom, to ?? dateTo);
     const c = sp.get("cur");
     if (c) setCurrency(c);
     const v = sp.get("view");
@@ -55,10 +57,11 @@ export function useContextUrlSync(): void {
     set("ws", workspace?.id);
     set("grp", group?.id);
     set("ent", entity?.id);
-    set("period", period);
+    set("from", dateFrom);
+    set("to", dateTo);
     set("cur", currency);
     set("view", view);
     if (next.toString() !== sp.toString()) setSp(next, { replace: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [workspace?.id, group?.id, entity?.id, period, currency, view]);
+  }, [workspace?.id, group?.id, entity?.id, dateFrom, dateTo, currency, view]);
 }
