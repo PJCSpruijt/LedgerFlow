@@ -21,6 +21,11 @@ export interface TrialBalanceLine {
   /** debit - credit (positive = debit balance, negative = credit balance) */
   balance: number;
   currency: string;
+
+  /* ---- RGS normalization metadata (set by applyRgsMappings when enabled) ---- */
+  rgsCode?: string | null;
+  rgsType?: string | null;
+  finCategory?: string | null;
 }
 
 export interface TransactionLine {
@@ -57,6 +62,14 @@ export interface TransactionLine {
    *  - INFERRED: resolved via ledger category (single unambiguous match)
    *  - REQUIRED: could not be resolved → needs a user-maintained VAT mapping */
   mappingConfidence?: "EXACT" | "INFERRED" | "REQUIRED";
+
+  /* ---- RGS normalization metadata (set by applyRgsMappings when enabled) ---- */
+  /** Mapped RGS referentiecode for this line's source GL account, if any. */
+  rgsCode?: string | null;
+  /** RGS level/type of the mapped code ("account" | "mutation" | …). */
+  rgsType?: string | null;
+  /** FIN//HUB semantic category key (e.g. "MRR"), layered on top of RGS. */
+  finCategory?: string | null;
 }
 
 export interface DateRange {

@@ -13,6 +13,7 @@ import {
 import { requireActiveSubscription } from "../middleware/subscription.js";
 import { getConnectorForEntity } from "../clients/connectors/registry.js";
 import { applyVatMappings } from "../services/vat-mapping.service.js";
+import { applyRgsMappings } from "../services/rgs-mapping.service.js";
 import { ConnectionKind } from "@prisma/client";
 import { BadRequestError, NotFoundError } from "../utils/errors.js";
 
@@ -166,9 +167,11 @@ yukiRouter.get(
   requireActiveSubscription,
   validateQuery(DateRangeQuery),
   asyncHandler(async (req, res) => {
-    const connector = await getConnectorForEntity(requireEntity(req));
+    const entityId = requireEntity(req);
+    const connector = await getConnectorForEntity(entityId);
     const data = await connector.getTrialBalance(req.query as unknown as { from: string; to: string });
-    res.json({ range: req.query, rows: data });
+    const rows = await applyRgsMappings(data, req.scope!.workspaceId, entityId);
+    res.json({ range: req.query, rows });
   }),
 );
 
@@ -182,7 +185,8 @@ yukiRouter.get(
     const entityId = requireEntity(req);
     const connector = await getConnectorForEntity(entityId);
     const data = await connector.getTransactions(req.query as unknown as { from: string; to: string });
-    const rows = await applyVatMappings(data, req.scope!.workspaceId, entityId);
+    const vatRows = await applyVatMappings(data, req.scope!.workspaceId, entityId);
+    const rows = await applyRgsMappings(vatRows, req.scope!.workspaceId, entityId);
     res.json({ range: req.query, rows });
   }),
 );
