@@ -141,6 +141,115 @@ rgsMappingRouter.get(
   }),
 );
 
+/**
+ * Consolidated normalized chart ("Universeel rekeningschema"): the RGS codes
+ * actually in use across the current scope (workspace / group / entity), each
+ * with the underlying source accounts per administration, plus the source
+ * accounts that are not yet mapped. Read-only — mapping happens on GET / + POST.
+ */
+rgsMappingRouter.get(
+  "/universal",
+  asyncHandler(async (req, res) => {
+    const workspaceId = req.scope!.workspaceId;
+    const { entityId, groupId } = req.scope!;
+    const entities = await prisma.entity.findMany({
+      where: entityId ? { id: entityId } : groupId ? { groupId } : { group: { workspaceId } },
+      select: { id: true, name: true },
+    });
+    const entityIds = entities.map((e) => e.id);
+    const nameById = new Map(entities.map((e) => [e.id, e.name]));
+    const version = await resolveRgsVersion(workspaceId);
+    if (entityIds.length === 0) {
+      res.json({ version, entities: [], groups: [], unmapped: [] });
+      return;
+    }
+
+    const [mappings, sources] = await Promise.all([
+      prisma.sourceAccountMapping.findMany({
+        where: { entityId: { in: entityIds }, supersededAt: null },
+        include: { finCategory: true },
+      }),
+      prisma.sourceAccount.findMany({
+        where: { entityId: { in: entityIds } },
+        select: { entityId: true, code: true, name: true },
+      }),
+    ]);
+    const sourceNameByKey = new Map(sources.map((s) => [`${s.entityId}:${s.code}`, s.name]));
+
+    const codes = [...new Set(mappings.map((m) => m.rgsCode).filter((c): c is string => !!c))];
+    const rgs = codes.length
+      ? await prisma.rgsAccount.findMany({
+          where: { version, code: { in: codes } },
+          select: { code: true, description: true, level: true, isBalanceSheet: true, isProfitLoss: true },
+        })
+      : [];
+    const rgsByCode = new Map(rgs.map((r) => [r.code, r]));
+
+    interface Entry {
+      entityId: string;
+      entityName: string;
+      sourceCode: string;
+      sourceName: string;
+    }
+    interface GroupAcc {
+      rgsCode: string;
+      description: string;
+      level: number;
+      side: "B" | "W" | null;
+      finCategories: Set<string>;
+      entries: Entry[];
+    }
+    const groups = new Map<string, GroupAcc>();
+    const mappedKeys = new Set<string>();
+    for (const m of mappings) {
+      if (!m.rgsCode) continue;
+      mappedKeys.add(`${m.entityId}:${m.sourceAccountCode}`);
+      const meta = rgsByCode.get(m.rgsCode);
+      const g =
+        groups.get(m.rgsCode) ??
+        ({
+          rgsCode: m.rgsCode,
+          description: meta?.description ?? "(onbekende RGS-code)",
+          level: meta?.level ?? 0,
+          side: meta?.isBalanceSheet ? "B" : meta?.isProfitLoss ? "W" : null,
+          finCategories: new Set<string>(),
+          entries: [],
+        } as GroupAcc);
+      if (m.finCategory?.key) g.finCategories.add(m.finCategory.key);
+      g.entries.push({
+        entityId: m.entityId,
+        entityName: nameById.get(m.entityId) ?? m.entityId,
+        sourceCode: m.sourceAccountCode,
+        sourceName: sourceNameByKey.get(`${m.entityId}:${m.sourceAccountCode}`) ?? m.sourceAccountCode,
+      });
+      groups.set(m.rgsCode, g);
+    }
+
+    const unmapped: Entry[] = sources
+      .filter((s) => !mappedKeys.has(`${s.entityId}:${s.code}`))
+      .map((s) => ({
+        entityId: s.entityId,
+        entityName: nameById.get(s.entityId) ?? s.entityId,
+        sourceCode: s.code,
+        sourceName: s.name,
+      }));
+
+    const out = [...groups.values()]
+      .map((g) => ({
+        rgsCode: g.rgsCode,
+        description: g.description,
+        level: g.level,
+        side: g.side,
+        finCategories: [...g.finCategories],
+        count: g.entries.length,
+        entries: g.entries.sort((a, b) => a.entityName.localeCompare(b.entityName)),
+      }))
+      .sort((a, b) => a.rgsCode.localeCompare(b.rgsCode));
+
+    res.json({ version, entities, groups: out, unmapped });
+  }),
+);
+
 const SetSchema = z.object({
   sourceAccountCode: z.string().min(1).max(64),
   rgsCode: z.string().max(32).nullable().optional(),
