@@ -332,6 +332,21 @@ model RefreshToken {
   @@index([userId])
 }
 
+// Cached daily FX rates (ECB via Frankfurter). Keyed by the REQUESTED date plus
+// the from/to currencies; rateDate is the actual ECB business day used (may drift
+// on weekends/holidays). Lets reporting convert to one currency cheaply.
+model FxRate {
+  date      String // requested date, YYYY-MM-DD
+  base      String // from currency (ISO-4217)
+  quote     String // to currency
+  rate      Float
+  rateDate  String // actual ECB date returned
+  fetchedAt DateTime @default(now())
+
+  @@id([date, base, quote])
+  @@index([base, quote])
+}
+
 // Records every Stripe event id we've already handled, so duplicate webhook
 // deliveries (Stripe retries / at-least-once delivery) become no-ops.
 model ProcessedStripeEvent {

@@ -70,6 +70,12 @@ export interface TransactionLine {
   rgsType?: string | null;
   /** FIN//HUB semantic category key (e.g. "MRR"), layered on top of RGS. */
   finCategory?: string | null;
+
+  /* ---- Reporting-currency conversion (set by the FX step in the route) ---- */
+  /** `amount` converted to the requested reporting currency at the line's date. */
+  reportingAmount?: number;
+  /** The reporting currency the amount was converted to (or original if no rate). */
+  reportingCurrency?: string;
 }
 
 export interface DateRange {

@@ -17,6 +17,8 @@ interface Tx {
   documentId?: string | null;
   description: string;
   currency: string;
+  reportingAmount?: number;
+  reportingCurrency?: string;
   generatedByConnector?: boolean;
   vatCode?: string | null;
   mappingConfidence?: "EXACT" | "INFERRED" | "REQUIRED";
@@ -29,7 +31,14 @@ interface Group {
   total: number;
 }
 
-type SortKey = "date" | "amount" | "contactName" | "reference" | "documentType" | "description";
+type SortKey =
+  | "date"
+  | "amount"
+  | "original"
+  | "contactName"
+  | "reference"
+  | "documentType"
+  | "description";
 type SortDir = "asc" | "desc";
 interface SortRule {
   key: SortKey;
@@ -52,6 +61,7 @@ interface ColumnDef {
 const COLUMNS: ColumnDef[] = [
   { key: "date", label: "Datum", group: "date" },
   { key: "amount", label: "Bedrag", align: "right" },
+  { key: "original", label: "Origineel", align: "right" },
   { key: "contactName", label: "Relatie", group: "contactName" },
   { key: "reference", label: "Referentie" },
   { key: "documentType", label: "Documenttype", group: "documentType" },
@@ -62,6 +72,7 @@ const COLUMNS: ColumnDef[] = [
 const DEFAULT_WIDTHS: Record<SortKey, number> = {
   date: 110,
   amount: 120,
+  original: 120,
   contactName: 200,
   reference: 120,
   documentType: 160,
@@ -70,7 +81,8 @@ const DEFAULT_WIDTHS: Record<SortKey, number> = {
 const WIDTHS_LS = "fh_tx_col_widths";
 
 function compareBy(key: SortKey, a: Tx, b: Tx): number {
-  if (key === "amount") return a.amount - b.amount;
+  if (key === "amount") return (a.reportingAmount ?? a.amount) - (b.reportingAmount ?? b.amount);
+  if (key === "original") return a.amount - b.amount;
   if (key === "date") return a.date.localeCompare(b.date);
   const av = (a[key] ?? "") as string;
   const bv = (b[key] ?? "") as string;
@@ -175,8 +187,9 @@ export function TransactionsPage() {
   const relationFilter = sp.get("relation");
 
   const { data, isLoading, isError, error } = useQuery({
-    queryKey: ["transactions", entity?.id, dateFrom, dateTo],
-    queryFn: () => api<{ rows: Tx[] }>(`/api/yuki/transactions?from=${dateFrom}&to=${dateTo}`),
+    queryKey: ["transactions", entity?.id, dateFrom, dateTo, currency],
+    queryFn: () =>
+      api<{ rows: Tx[] }>(`/api/yuki/transactions?from=${dateFrom}&to=${dateTo}&currency=${currency}`),
     enabled: !!entity,
   });
 
@@ -195,7 +208,7 @@ export function TransactionsPage() {
         byCode.get(code) ?? { code, name: t.glAccountName || "(geen grootboekrekening)", lines: [], total: 0 };
       if (!g.name || g.name === "(geen grootboekrekening)") g.name = t.glAccountName || g.name;
       g.lines.push(t);
-      g.total += t.amount;
+      g.total += t.reportingAmount ?? t.amount;
       byCode.set(code, g);
     }
     // Sort lines within each subgroup by the user's column-priority order.
@@ -433,6 +446,7 @@ export function TransactionsPage() {
                 : totalLines}{" "}
               regels
             </span>
+            <span className="text-slate-400">· bedragen in {currency}</span>
             {groupBy.length > 0 && (
               <span className="text-slate-400">
                 · Subtotalen per {groupBy.map((f) => GROUP_FIELD_LABEL[f]).join(" › ")}
@@ -618,7 +632,7 @@ function buildRows(
   );
   const out: ReactNode[] = [];
   for (const [v, sub] of entries) {
-    const subtotal = sub.reduce((s, t) => s + t.amount, 0);
+    const subtotal = sub.reduce((s, t) => s + (t.reportingAmount ?? t.amount), 0);
     out.push(
       <tr key={`${keyPrefix}${v}#h`} className="bg-slate-50/60 border-b border-slate-100">
         <td
@@ -656,8 +670,13 @@ function LineRow({
       <td className="py-1.5 px-3 truncate" style={{ paddingLeft: `${indentRem(level)}rem` }}>
         {t.date}
       </td>
-      <td className={`py-1.5 px-3 text-right whitespace-nowrap ${t.amount < 0 ? "text-red-600" : ""}`}>
-        {formatMoney(t.amount, t.currency || currency)}
+      <td className={`py-1.5 px-3 text-right whitespace-nowrap ${(t.reportingAmount ?? t.amount) < 0 ? "text-red-600" : ""}`}>
+        {formatMoney(t.reportingAmount ?? t.amount, t.reportingCurrency ?? currency)}
+      </td>
+      <td className="py-1.5 px-3 text-right whitespace-nowrap text-slate-400">
+        {t.reportingCurrency && t.currency && t.reportingCurrency !== t.currency
+          ? formatMoney(t.amount, t.currency)
+          : ""}
       </td>
       <td className="py-1.5 px-3 truncate" title={t.contactName ?? ""}>
         {t.contactName ?? ""}
