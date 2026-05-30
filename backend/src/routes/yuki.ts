@@ -5,6 +5,7 @@ import { encryptJson } from "../utils/crypto.js";
 import { asyncHandler } from "../middleware/asyncHandler.js";
 import { validateBody, validateQuery } from "../middleware/validate.js";
 import {
+  isPlatformAdmin,
   requireAuth,
   requireScope,
   requireScopeRole,
@@ -133,6 +134,50 @@ yukiRouter.get(
             updatedAt: conn.updatedAt,
           }
         : null,
+    });
+  }),
+);
+
+/**
+ * Workspace-wide overview of all administrations and their connection status
+ * (no credentials). Filtered to the entities the user can actually reach
+ * (workspace / group / entity memberships; platform admins see all).
+ */
+yukiRouter.get(
+  "/connections",
+  requireAuth,
+  requireScope,
+  asyncHandler(async (req, res) => {
+    const workspaceId = req.scope!.workspaceId;
+    const memberships = await prisma.membership.findMany({ where: { userId: req.user!.id } });
+    const wsAccess =
+      isPlatformAdmin(req) ||
+      memberships.some((m) => m.scopeLevel === "WORKSPACE" && m.workspaceId === workspaceId);
+    const groupIds = new Set(memberships.filter((m) => m.groupId).map((m) => m.groupId));
+    const entIds = new Set(memberships.filter((m) => m.entityId).map((m) => m.entityId));
+
+    const entities = await prisma.entity.findMany({
+      where: { group: { workspaceId } },
+      select: {
+        id: true,
+        name: true,
+        groupId: true,
+        group: { select: { name: true } },
+        connection: {
+          select: { kind: true, environment: true, lastTestedAt: true, lastSyncAt: true, updatedAt: true },
+        },
+      },
+      orderBy: { name: "asc" },
+    });
+
+    const visible = entities.filter((e) => wsAccess || groupIds.has(e.groupId) || entIds.has(e.id));
+    res.json({
+      connections: visible.map((e) => ({
+        entityId: e.id,
+        entityName: e.name,
+        groupName: e.group.name,
+        connection: e.connection,
+      })),
     });
   }),
 );
