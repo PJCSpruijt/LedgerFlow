@@ -1,21 +1,14 @@
 import type { ReactElement } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 import { useAuth } from "./contexts/AuthContext";
-import { AppLayout } from "./layouts/AppLayout";
+import { AppShell } from "./layouts/AppShell";
 import { AuthLayout } from "./layouts/AuthLayout";
 import { LoginPage } from "./pages/LoginPage";
 import { RegisterPage } from "./pages/RegisterPage";
-import { DashboardPage } from "./pages/DashboardPage";
-import { SettingsPage } from "./pages/SettingsPage";
 import { BillingPage } from "./pages/BillingPage";
-import { YukiPage } from "./pages/YukiPage";
-import { ExportsPage } from "./pages/ExportsPage";
-import { AdminPage } from "./pages/AdminPage";
-import { AdminPlansPage } from "./pages/AdminPlansPage";
-import { AdminUsersPage } from "./pages/AdminUsersPage";
-import { AdminStatsPage } from "./pages/AdminStatsPage";
 import { AcceptInvitationPage, ResetPasswordPage } from "./pages/SetPasswordPage";
 import { MandatoryTwoFactorPage } from "./pages/MandatoryTwoFactorPage";
+import { MODULES, LEGACY_REDIRECTS } from "./navigation/navConfig";
 
 function RequireAuth({ children }: { children: ReactElement }) {
   const { user, loading } = useAuth();
@@ -26,7 +19,7 @@ function RequireAuth({ children }: { children: ReactElement }) {
 
 function RequirePlatformAdmin({ children }: { children: ReactElement }) {
   const { user } = useAuth();
-  if (user?.platformRole !== "PLATFORM_ADMIN") return <Navigate to="/dashboard" replace />;
+  if (user?.platformRole !== "PLATFORM_ADMIN") return <Navigate to="/dashboard/overview" replace />;
   return children;
 }
 
@@ -44,9 +37,7 @@ function Require2FAEnrollment({ children }: { children: ReactElement }) {
 
 function FullScreenLoading() {
   return (
-    <div className="flex h-screen items-center justify-center text-slate-500">
-      Laden…
-    </div>
+    <div className="flex h-screen items-center justify-center text-slate-500">Laden…</div>
   );
 }
 
@@ -64,54 +55,46 @@ export function App() {
         element={
           <RequireAuth>
             <Require2FAEnrollment>
-              <AppLayout />
+              <AppShell />
             </Require2FAEnrollment>
           </RequireAuth>
         }
       >
-        <Route path="/" element={<Navigate to="/dashboard" replace />} />
-        <Route path="/dashboard" element={<DashboardPage />} />
-        <Route path="/settings" element={<SettingsPage />} />
-        <Route path="/billing" element={<BillingPage />} />
+        <Route path="/" element={<Navigate to="/dashboard/overview" replace />} />
+
+        {/* Module + subpage routes, generated from navConfig. */}
+        {MODULES.flatMap((mod) => [
+          <Route
+            key={`${mod.key}-index`}
+            path={mod.basePath}
+            element={<Navigate to={`${mod.basePath}/${mod.subpages[0]!.path}`} replace />}
+          />,
+          ...mod.subpages.map((sp) => (
+            <Route
+              key={`${mod.key}-${sp.path}`}
+              path={`${mod.basePath}/${sp.path}`}
+              element={
+                mod.platformAdminOnly ? (
+                  <RequirePlatformAdmin>{sp.element}</RequirePlatformAdmin>
+                ) : (
+                  sp.element
+                )
+              }
+            />
+          )),
+        ])}
+
+        {/* Stripe return URLs (configured in env) must keep resolving to Billing. */}
         <Route path="/billing/success" element={<BillingPage />} />
         <Route path="/billing/cancel" element={<BillingPage />} />
-        <Route path="/yuki" element={<YukiPage />} />
-        <Route path="/exports" element={<ExportsPage />} />
-        <Route
-          path="/admin"
-          element={
-            <RequirePlatformAdmin>
-              <AdminPage />
-            </RequirePlatformAdmin>
-          }
-        />
-        <Route
-          path="/admin/plans"
-          element={
-            <RequirePlatformAdmin>
-              <AdminPlansPage />
-            </RequirePlatformAdmin>
-          }
-        />
-        <Route
-          path="/admin/users"
-          element={
-            <RequirePlatformAdmin>
-              <AdminUsersPage />
-            </RequirePlatformAdmin>
-          }
-        />
-        <Route
-          path="/admin/stats"
-          element={
-            <RequirePlatformAdmin>
-              <AdminStatsPage />
-            </RequirePlatformAdmin>
-          }
-        />
+
+        {/* Legacy path redirects so old links/bookmarks keep working. */}
+        {Object.entries(LEGACY_REDIRECTS).map(([from, to]) => (
+          <Route key={from} path={from} element={<Navigate to={to} replace />} />
+        ))}
       </Route>
 
-      <Route path="*" element={<Navigate to="/dashboard" replace />} />
+      <Route path="*" element={<Navigate to="/dashboard/overview" replace />} />
     </Routes>
   );
 }

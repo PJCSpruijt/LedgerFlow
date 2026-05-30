@@ -120,9 +120,61 @@ billingRouter.get(
             modules: sub.planRef?.modules ?? [],
             status: sub.status,
             validUntil: sub.validUntil,
+            cancelAtPeriodEnd: sub.cancelAtPeriodEnd,
+            // Cancellable from the app only when it's a real Stripe subscription.
+            stripeManaged: !!sub.stripeSubscriptionId,
           }
         : null,
     });
+  }),
+);
+
+/**
+ * Cancel the active subscription from within FIN//HUB. We push the cancellation
+ * to Stripe (cancel_at_period_end) so the incasso stops; access continues until
+ * the paid period ends, after which the webhook flips the status. Admin only.
+ */
+billingRouter.post(
+  "/cancel",
+  requireAuth,
+  requireScope,
+  requireScopeRole(ScopedRole.WORKSPACE_ADMIN),
+  asyncHandler(async (req, res) => {
+    const workspaceId = req.scope!.workspaceId;
+    const sub = await prisma.subscription.findUnique({ where: { workspaceId } });
+    if (!sub?.stripeSubscriptionId) {
+      throw new BadRequestError("Geen actief Stripe-abonnement om op te zeggen");
+    }
+    const updated = await stripe.subscriptions.update(sub.stripeSubscriptionId, {
+      cancel_at_period_end: true,
+    });
+    await prisma.subscription.update({
+      where: { workspaceId },
+      data: { cancelAtPeriodEnd: true },
+    });
+    await prisma.auditLog.create({
+      data: { workspaceId, userId: req.user!.id, action: "subscription.cancel_requested", metadata: {} },
+    });
+    res.json({ cancelAtPeriodEnd: true, validUntil: sub.validUntil, stripeStatus: updated.status });
+  }),
+);
+
+/** Undo a pending cancellation (keep the subscription + incasso running). */
+billingRouter.post(
+  "/resume",
+  requireAuth,
+  requireScope,
+  requireScopeRole(ScopedRole.WORKSPACE_ADMIN),
+  asyncHandler(async (req, res) => {
+    const workspaceId = req.scope!.workspaceId;
+    const sub = await prisma.subscription.findUnique({ where: { workspaceId } });
+    if (!sub?.stripeSubscriptionId) throw new BadRequestError("Geen Stripe-abonnement gevonden");
+    await stripe.subscriptions.update(sub.stripeSubscriptionId, { cancel_at_period_end: false });
+    await prisma.subscription.update({ where: { workspaceId }, data: { cancelAtPeriodEnd: false } });
+    await prisma.auditLog.create({
+      data: { workspaceId, userId: req.user!.id, action: "subscription.cancel_revoked", metadata: {} },
+    });
+    res.json({ cancelAtPeriodEnd: false });
   }),
 );
 
@@ -231,6 +283,7 @@ async function upsertSubscription(
     (item as unknown as { current_period_end?: number } | undefined)?.current_period_end ??
     (sub as unknown as { current_period_end?: number }).current_period_end;
   const validUntil = typeof cpeRaw === "number" ? new Date(cpeRaw * 1000) : null;
+  const cancelAtPeriodEnd = sub.cancel_at_period_end === true;
 
   await prisma.subscription.upsert({
     where: { workspaceId },
@@ -242,6 +295,7 @@ async function upsertSubscription(
       planId: planRow?.id ?? null,
       status,
       validUntil,
+      cancelAtPeriodEnd,
     },
     update: {
       stripeCustomerId: customerId ?? undefined,
@@ -250,6 +304,7 @@ async function upsertSubscription(
       planId: planRow?.id ?? undefined,
       status,
       validUntil,
+      cancelAtPeriodEnd,
     },
   });
 

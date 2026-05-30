@@ -39,6 +39,12 @@ export const MODULES = [
     description: "Consolideren over meerdere administraties heen.",
   },
   {
+    key: "RGS",
+    label: "RGS-normalisatie",
+    description:
+      "Bronrekeningen koppelen aan het Referentie Grootboekschema (RGS) + FIN-categorieën.",
+  },
+  {
     key: "AI_INSIGHTS",
     label: "AI-commentaar",
     description: "AI-gegenereerde toelichting bij cijfers (beta).",

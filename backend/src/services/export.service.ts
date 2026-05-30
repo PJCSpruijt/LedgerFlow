@@ -18,8 +18,13 @@ import type {
 export interface ExportContext {
   /** Human label for what the export covers (single administration or whole workspace). */
   scopeLabel: string;
-  /** Names of every administration included, in order. */
+  /** Names of every administration included (with data) in the export, in order. */
   administrations: string[];
+  /**
+   * Names of administrations that were requested but skipped because they have
+   * no connector configured. Empty when nothing was skipped.
+   */
+  skippedAdministrations: string[];
   generatedAt: Date;
   from: string;
   to: string;
@@ -258,6 +263,15 @@ function addMetadataSheet(
     ["Bron", ctx.connectorKinds.map((k) => k.toUpperCase()).join(", ")],
     ["Gegenereerd op", ctx.generatedAt],
   ];
+  if (ctx.skippedAdministrations.length) {
+    data.push(
+      ["Overgeslagen administraties", ctx.skippedAdministrations.join(", ")],
+      [
+        "Reden overgeslagen",
+        "Geen koppeling geconfigureerd — deze administraties zijn niet in de export opgenomen.",
+      ],
+    );
+  }
   for (const [k, v] of data) ws.addRow({ k, v });
   ws.getColumn("v").alignment = { wrapText: true, vertical: "top" };
 }

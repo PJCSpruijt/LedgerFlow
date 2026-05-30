@@ -20,6 +20,8 @@ interface Subscription {
   planName: string | null;
   status: string;
   validUntil: string | null;
+  cancelAtPeriodEnd: boolean;
+  stripeManaged: boolean;
 }
 
 const fmtPrice = (cents: number, currency: string, interval: string) => {
@@ -34,6 +36,40 @@ export function BillingPage() {
   const [sub, setSub] = useState<Subscription | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [busyPlan, setBusyPlan] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const isWorkspaceAdmin = workspace?.role === "WORKSPACE_ADMIN";
+
+  const loadSub = async () => {
+    const r = await api<{ subscription: Subscription | null }>("/api/billing/subscription");
+    setSub(r.subscription);
+  };
+
+  const cancelSub = async () => {
+    if (!window.confirm("Abonnement opzeggen? De incasso stopt; je houdt toegang tot het einde van de betaalde periode.")) return;
+    setErr(null);
+    setBusy(true);
+    try {
+      await api("/api/billing/cancel", { method: "POST" });
+      await loadSub();
+    } catch (e) {
+      setErr(e instanceof ApiError ? e.message : "Opzeggen mislukt");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const resumeSub = async () => {
+    setErr(null);
+    setBusy(true);
+    try {
+      await api("/api/billing/resume", { method: "POST" });
+      await loadSub();
+    } catch (e) {
+      setErr(e instanceof ApiError ? e.message : "Hervatten mislukt");
+    } finally {
+      setBusy(false);
+    }
+  };
 
   useEffect(() => {
     void (async () => {
@@ -48,14 +84,10 @@ export function BillingPage() {
 
   useEffect(() => {
     if (!workspace) return;
-    void (async () => {
-      try {
-        const r = await api<{ subscription: Subscription | null }>("/api/billing/subscription");
-        setSub(r.subscription);
-      } catch (e) {
-        setErr(e instanceof ApiError ? e.message : "Kon abonnement niet laden");
-      }
-    })();
+    void loadSub().catch((e) =>
+      setErr(e instanceof ApiError ? e.message : "Kon abonnement niet laden"),
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workspace?.id]);
 
   const startCheckout = async (planKey: string) => {
@@ -104,9 +136,36 @@ export function BillingPage() {
         </div>
         {sub?.validUntil && (
           <div className="text-xs text-slate-500 mt-1">
-            Geldig tot {new Date(sub.validUntil).toLocaleDateString("nl-NL")}
+            {sub.cancelAtPeriodEnd ? "Toegang tot" : "Geldig tot"}{" "}
+            {new Date(sub.validUntil).toLocaleDateString("nl-NL")}
           </div>
         )}
+
+        {sub?.stripeManaged && sub.cancelAtPeriodEnd && (
+          <div className="mt-3 lf-card bg-amber-50 ring-amber-200 text-amber-900 text-sm flex items-center justify-between gap-3">
+            <span>Opgezegd — de incasso stopt aan het einde van de periode.</span>
+            {isWorkspaceAdmin && (
+              <button className="lf-btn-secondary shrink-0" onClick={resumeSub} disabled={busy}>
+                {busy ? "Bezig…" : "Opzegging ongedaan maken"}
+              </button>
+            )}
+          </div>
+        )}
+
+        {sub?.stripeManaged &&
+          !sub.cancelAtPeriodEnd &&
+          ["ACTIVE", "TRIALING", "PAST_DUE"].includes(sub.status) &&
+          isWorkspaceAdmin && (
+            <div className="mt-3">
+              <button className="text-sm text-red-600 hover:underline disabled:opacity-50" onClick={cancelSub} disabled={busy}>
+                {busy ? "Bezig…" : "Abonnement opzeggen"}
+              </button>
+              <p className="text-xs text-slate-400 mt-1">
+                Opzeggen stopt de incasso bij Stripe; je houdt toegang tot het einde van de betaalde
+                periode.
+              </p>
+            </div>
+          )}
       </div>
 
       {err && <div className="text-sm text-red-600">{err}</div>}

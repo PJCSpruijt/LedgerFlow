@@ -21,6 +21,12 @@ import { requireAuth, requirePlatformAdmin } from "../middleware/auth.js";
 import { MODULES, isModuleKey } from "../config/modules.js";
 import { createUserToken } from "../services/auth.service.js";
 import {
+  importRgsDataset,
+  listRgsVersions,
+  loadBundledRgs,
+  searchRgsAccounts,
+} from "../services/rgs-import.service.js";
+import {
   isEmailConfigured,
   sendInvitationEmail,
   sendPasswordResetEmail,
@@ -84,8 +90,14 @@ adminRouter.get(
             entities: {
               orderBy: { createdAt: "asc" },
               include: {
-                yukiConnection: {
-                  select: { id: true, environment: true, lastTestedAt: true, lastSyncAt: true },
+                connection: {
+                  select: {
+                    id: true,
+                    kind: true,
+                    environment: true,
+                    lastTestedAt: true,
+                    lastSyncAt: true,
+                  },
                 },
               },
             },
@@ -116,11 +128,12 @@ adminRouter.get(
           entities: g.entities.map((e) => ({
             id: e.id,
             name: e.name,
-            yuki: e.yukiConnection
+            connection: e.connection
               ? {
-                  environment: e.yukiConnection.environment,
-                  lastTestedAt: e.yukiConnection.lastTestedAt,
-                  lastSyncAt: e.yukiConnection.lastSyncAt,
+                  kind: e.connection.kind,
+                  environment: e.connection.environment,
+                  lastTestedAt: e.connection.lastTestedAt,
+                  lastSyncAt: e.connection.lastSyncAt,
                 }
               : null,
           })),
@@ -1027,5 +1040,119 @@ adminRouter.delete(
     if (!existing) throw new NotFoundError("Administratie niet gevonden");
     await prisma.entity.delete({ where: { id } });
     res.status(204).end();
+  }),
+);
+
+const MoveEntitySchema = z.object({ targetGroupId: z.string().uuid() });
+
+/**
+ * Move an administration to another group (and thereby, possibly, another
+ * workspace). The connector/credentials, entity-level memberships and audit
+ * trail travel with the entity. Entity-scoped VAT mappings are re-pointed to the
+ * new workspace so they keep applying.
+ */
+adminRouter.patch(
+  "/entities/:id/move",
+  validateParams(IdParam),
+  validateBody(MoveEntitySchema),
+  asyncHandler(async (req, res) => {
+    const { id } = req.params as z.infer<typeof IdParam>;
+    const { targetGroupId } = req.body as z.infer<typeof MoveEntitySchema>;
+
+    const entity = await prisma.entity.findUnique({ where: { id }, include: { group: true } });
+    if (!entity) throw new NotFoundError("Administratie niet gevonden");
+    const target = await prisma.group.findUnique({ where: { id: targetGroupId } });
+    if (!target) throw new NotFoundError("Doelgroep niet gevonden");
+
+    if (target.id === entity.groupId) {
+      res.json({ entity: { id: entity.id, name: entity.name, groupId: entity.groupId } });
+      return;
+    }
+
+    const fromWorkspaceId = entity.group.workspaceId;
+    const toWorkspaceId = target.workspaceId;
+
+    await prisma.$transaction(async (tx) => {
+      await tx.entity.update({ where: { id }, data: { groupId: targetGroupId } });
+      if (toWorkspaceId !== fromWorkspaceId) {
+        // Keep entity-scoped VAT mappings valid under the new workspace.
+        await tx.vatMapping.updateMany({
+          where: { entityId: id },
+          data: { workspaceId: toWorkspaceId },
+        });
+      }
+      await tx.auditLog.create({
+        data: {
+          workspaceId: toWorkspaceId,
+          userId: req.user!.id,
+          action: "admin.entity.moved",
+          metadata: { entityId: id, fromWorkspaceId, toWorkspaceId, toGroupId: targetGroupId },
+        },
+      });
+    });
+
+    res.json({ entity: { id: entity.id, name: entity.name, groupId: targetGroupId } });
+  }),
+);
+
+// ---------------------------------------------------------------------------
+// RGS taxonomy (platform-global). Importing/refreshing the public RGS standard
+// and browsing it. Platform-admin only (guarded by the router-level middleware).
+// ---------------------------------------------------------------------------
+
+/** Loaded RGS versions with their row counts. */
+adminRouter.get(
+  "/rgs/versions",
+  asyncHandler(async (_req, res) => {
+    res.json({ versions: await listRgsVersions(), bundled: loadBundledRgs().version });
+  }),
+);
+
+const RgsBrowseQuery = z.object({
+  version: z.string().min(1),
+  q: z.string().optional(),
+  parentCode: z.string().optional(),
+  level: z.coerce.number().int().min(1).max(5).optional(),
+  limit: z.coerce.number().int().min(1).max(500).optional(),
+});
+
+/** Browse / search a version's taxonomy. */
+adminRouter.get(
+  "/rgs/accounts",
+  validateQuery(RgsBrowseQuery),
+  asyncHandler(async (req, res) => {
+    const q = req.query as unknown as z.infer<typeof RgsBrowseQuery>;
+    res.json({ accounts: await searchRgsAccounts(q) });
+  }),
+);
+
+const RgsImportSchema = z.object({
+  // "bundled" loads the dataset shipped with the app; "inline" imports the rows
+  // posted in the body (an uploaded official RGS export, already parsed to JSON).
+  source: z.enum(["bundled", "inline"]).default("bundled"),
+  version: z.string().min(1).optional(),
+  rows: z.array(z.record(z.unknown())).optional(),
+});
+
+/** Import or refresh an RGS version (authoritative replace of that version). */
+adminRouter.post(
+  "/rgs/import",
+  validateBody(RgsImportSchema),
+  asyncHandler(async (req, res) => {
+    const body = req.body as z.infer<typeof RgsImportSchema>;
+    let version: string;
+    let rows: unknown[];
+    if (body.source === "inline") {
+      if (!body.rows?.length) throw new BadRequestError("Geen RGS-regels meegestuurd");
+      version = body.version ?? "custom";
+      rows = body.rows;
+    } else {
+      const bundled = loadBundledRgs();
+      version = body.version ?? bundled.version;
+      rows = bundled.rows;
+    }
+    const result = await importRgsDataset(version, rows);
+    // Platform-global action (no workspace scope) → not workspace-audited here.
+    res.json(result);
   }),
 );

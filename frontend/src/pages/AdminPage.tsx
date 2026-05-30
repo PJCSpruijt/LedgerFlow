@@ -14,8 +14,15 @@ interface AdminUser {
 interface AdminEntity {
   id: string;
   name: string;
-  yuki: { environment: string; lastTestedAt: string | null; lastSyncAt: string | null } | null;
+  connection: {
+    kind: "YUKI" | "EBOEKHOUDEN";
+    environment: string;
+    lastTestedAt: string | null;
+    lastSyncAt: string | null;
+  } | null;
 }
+
+const CONNECTION_LABEL: Record<string, string> = { YUKI: "Yuki", EBOEKHOUDEN: "e-Boekhouden" };
 interface AdminGroup {
   id: string;
   name: string;
@@ -270,6 +277,7 @@ export function AdminPage() {
   const [loading, setLoading] = useState(true);
   const [showNewWs, setShowNewWs] = useState(false);
   const [editWs, setEditWs] = useState<{ id: string; name: string; type: string } | null>(null);
+  const [moveEntityId, setMoveEntityId] = useState<string | null>(null);
 
   const run = async (fn: () => Promise<unknown>) => {
     setErr(null);
@@ -329,6 +337,19 @@ export function AdminPage() {
       if (!window.confirm(`Administratie "${e.name}" verwijderen?`)) return;
       await api(`/api/admin/entities/${e.id}`, { method: "DELETE" });
     });
+  const moveEntity = (e: AdminEntity, targetGroupId: string) =>
+    run(async () => {
+      await api(`/api/admin/entities/${e.id}/move`, {
+        method: "PATCH",
+        body: { targetGroupId },
+      });
+      setMoveEntityId(null);
+    });
+
+  // Flat list of all groups across workspaces, for the move target picker.
+  const allGroups = workspaces.flatMap((w) =>
+    w.groups.map((g) => ({ id: g.id, label: `${w.name} › ${g.name}` })),
+  );
 
   const loadWorkspaces = async () => {
     const w = await api<{ workspaces: AdminWorkspace[] }>("/api/admin/workspaces");
@@ -527,14 +548,15 @@ export function AdminPage() {
                     ) : (
                       <ul className="mt-1 space-y-1">
                         {g.entities.map((e) => (
-                          <li key={e.id} className="text-sm flex items-center gap-2">
+                          <li key={e.id} className="text-sm flex items-center gap-2 flex-wrap">
                             <span>{e.name}</span>
-                            {e.yuki ? (
+                            {e.connection ? (
                               <span
                                 className="lf-pill bg-emerald-100 text-emerald-800"
-                                title={`Laatst getest: ${fmtDateTime(e.yuki.lastTestedAt)} · Laatste sync: ${fmtDateTime(e.yuki.lastSyncAt)}`}
+                                title={`Laatst getest: ${fmtDateTime(e.connection.lastTestedAt)} · Laatste sync: ${fmtDateTime(e.connection.lastSyncAt)}`}
                               >
-                                Yuki ({e.yuki.environment})
+                                {CONNECTION_LABEL[e.connection.kind] ?? e.connection.kind}
+                                {e.connection.kind === "YUKI" ? ` (${e.connection.environment})` : ""}
                               </span>
                             ) : (
                               <span className="lf-pill bg-slate-200 text-slate-600">
@@ -545,11 +567,46 @@ export function AdminPage() {
                               Hernoemen
                             </button>
                             <button
+                              className="lf-link text-xs"
+                              onClick={() => setMoveEntityId(moveEntityId === e.id ? null : e.id)}
+                            >
+                              Verplaatsen
+                            </button>
+                            <button
                               className="text-xs text-red-600 hover:underline"
                               onClick={() => deleteEntity(e)}
                             >
                               Verwijderen
                             </button>
+                            {moveEntityId === e.id && (
+                              <span className="flex items-center gap-2 basis-full mt-1">
+                                <span className="text-xs text-slate-500">Naar groep:</span>
+                                <select
+                                  className="lf-input text-xs w-72"
+                                  defaultValue=""
+                                  onChange={(ev) => {
+                                    if (ev.target.value) moveEntity(e, ev.target.value);
+                                  }}
+                                >
+                                  <option value="" disabled>
+                                    Kies doelgroep…
+                                  </option>
+                                  {allGroups
+                                    .filter((grp) => grp.id !== g.id)
+                                    .map((grp) => (
+                                      <option key={grp.id} value={grp.id}>
+                                        {grp.label}
+                                      </option>
+                                    ))}
+                                </select>
+                                <button
+                                  className="text-xs text-slate-500 hover:underline"
+                                  onClick={() => setMoveEntityId(null)}
+                                >
+                                  Annuleren
+                                </button>
+                              </span>
+                            )}
                           </li>
                         ))}
                       </ul>

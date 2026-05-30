@@ -35,6 +35,22 @@ export interface WorkspaceNode {
   groups: GroupNode[];
 }
 
+/** Which data layer the user is viewing across the app. */
+export type ViewType =
+  | "source"
+  | "normalized"
+  | "consolidated"
+  | "after_eliminations"
+  | "eliminations_only";
+
+export const VIEW_LABELS: Record<ViewType, string> = {
+  source: "Brondata",
+  normalized: "Genormaliseerd",
+  consolidated: "Geconsolideerd",
+  after_eliminations: "Na eliminaties",
+  eliminations_only: "Alleen eliminaties",
+};
+
 interface ScopeContextValue {
   workspaces: WorkspaceNode[];
   loading: boolean;
@@ -43,10 +59,24 @@ interface ScopeContextValue {
   entity: EntityNode | null;
   /** Effective role at the deepest selected level. */
   role: ScopedRole | null;
+  // Reporting context (top bar): a cumulative from/to date range + currency/view.
+  dateFrom: string; // "YYYY-MM-DD"
+  dateTo: string; // "YYYY-MM-DD"
+  currency: string;
+  view: ViewType;
   selectWorkspace: (id: string) => void;
   selectGroup: (id: string | null) => void;
   selectEntity: (id: string | null) => void;
+  setDateRange: (from: string, to: string) => void;
+  setCurrency: (c: string) => void;
+  setView: (v: ViewType) => void;
   reload: () => Promise<void>;
+}
+
+const CTX_LS = { from: "fh_from", to: "fh_to", currency: "fh_currency", view: "fh_view" };
+function defaultRange(): { from: string; to: string } {
+  const d = new Date();
+  return { from: `${d.getFullYear()}-01-01`, to: d.toISOString().slice(0, 10) };
 }
 
 const Ctx = createContext<ScopeContextValue | null>(null);
@@ -58,6 +88,32 @@ export function ScopeProvider({ children }: { children: ReactNode }) {
   const [workspaceId, setWorkspaceId] = useState<string | null>(scopeStore.workspaceId);
   const [groupId, setGroupId] = useState<string | null>(scopeStore.groupId);
   const [entityId, setEntityId] = useState<string | null>(scopeStore.entityId);
+  const [dateFrom, setFromState] = useState<string>(
+    () => localStorage.getItem(CTX_LS.from) ?? defaultRange().from,
+  );
+  const [dateTo, setToState] = useState<string>(
+    () => localStorage.getItem(CTX_LS.to) ?? defaultRange().to,
+  );
+  const [currency, setCurrencyState] = useState<string>(
+    () => localStorage.getItem(CTX_LS.currency) ?? "EUR",
+  );
+  const [view, setViewState] = useState<ViewType>(
+    () => (localStorage.getItem(CTX_LS.view) as ViewType) ?? "normalized",
+  );
+  const setDateRange = (from: string, to: string) => {
+    localStorage.setItem(CTX_LS.from, from);
+    localStorage.setItem(CTX_LS.to, to);
+    setFromState(from);
+    setToState(to);
+  };
+  const setCurrency = (c: string) => {
+    localStorage.setItem(CTX_LS.currency, c);
+    setCurrencyState(c);
+  };
+  const setView = (v: ViewType) => {
+    localStorage.setItem(CTX_LS.view, v);
+    setViewState(v);
+  };
 
   const reload = useCallback(async () => {
     if (!user) {
@@ -144,9 +200,16 @@ export function ScopeProvider({ children }: { children: ReactNode }) {
         group,
         entity,
         role,
+        dateFrom,
+        dateTo,
+        currency,
+        view,
         selectWorkspace,
         selectGroup,
         selectEntity,
+        setDateRange,
+        setCurrency,
+        setView,
         reload,
       }}
     >
