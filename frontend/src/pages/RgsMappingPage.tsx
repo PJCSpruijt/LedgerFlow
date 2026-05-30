@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError } from "../services/api";
 import { isAdminRole, useScope } from "../contexts/ScopeContext";
+import { RgsCodeSearch } from "../components/RgsCodeSearch";
 
 interface Suggestion {
   rgsCode: string;
@@ -44,7 +45,6 @@ export function RgsMappingPage() {
   const canEdit = isAdminRole(entity?.role ?? workspace?.role);
   const qc = useQueryClient();
   const [err, setErr] = useState<string | null>(null);
-  const [manual, setManual] = useState<Record<string, string>>({});
   const [history, setHistory] = useState<{ code: string; rows: unknown[] } | null>(null);
 
   const key = ["rgs-mappings", entity?.id];
@@ -201,30 +201,11 @@ export function RgsMappingPage() {
                               <span className="text-xs text-slate-300">geen suggesties</span>
                             )}
                           </div>
-                          <div className="flex items-center gap-1 mt-1">
-                            <input
-                              className="lf-input font-mono text-xs h-7 py-0 w-32"
-                              placeholder="RGS-code…"
-                              value={manual[row.code] ?? ""}
-                              onChange={(e) => setManual({ ...manual, [row.code]: e.target.value })}
-                              onKeyDown={(e) => {
-                                if (e.key === "Enter" && manual[row.code]?.trim()) {
-                                  apply(row, { rgsCode: manual[row.code]!.trim() }, "MANUAL");
-                                  setManual({ ...manual, [row.code]: "" });
-                                }
-                              }}
+                          <div className="mt-1">
+                            <RgsCodeSearch
+                              accountType={row.accountType}
+                              onPick={(code) => apply(row, { rgsCode: code }, "MANUAL")}
                             />
-                            <button
-                              className="lf-link text-xs"
-                              onClick={() => {
-                                if (manual[row.code]?.trim()) {
-                                  apply(row, { rgsCode: manual[row.code]!.trim() }, "MANUAL");
-                                  setManual({ ...manual, [row.code]: "" });
-                                }
-                              }}
-                            >
-                              Koppel
-                            </button>
                           </div>
                         </>
                       )}

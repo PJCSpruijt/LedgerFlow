@@ -11,6 +11,7 @@ import {
 } from "../middleware/auth.js";
 import { requireModule } from "../middleware/subscription.js";
 import { BadRequestError } from "../utils/errors.js";
+import { searchRgsAccounts } from "../services/rgs-import.service.js";
 import { listSourceAccounts, syncSourceAccounts } from "../services/source-account.service.js";
 import {
   getActiveMappings,
@@ -97,6 +98,45 @@ rgsMappingRouter.get(
           suggestions: suggestions.get(a.code) ?? [],
         };
       }),
+    });
+  }),
+);
+
+const RgsSearchQuery = z.object({
+  q: z.string().min(1).max(80),
+  // Optionally constrain to the balans (B) or winst&verlies (W) side.
+  side: z.enum(["B", "W"]).optional(),
+  limit: z.coerce.number().int().min(1).max(50).optional(),
+});
+
+/** Typeahead over the workspace's effective RGS version (code + omschrijving). */
+rgsMappingRouter.get(
+  "/rgs-search",
+  validateQuery(RgsSearchQuery),
+  asyncHandler(async (req, res) => {
+    const workspaceId = req.scope!.workspaceId;
+    const version = await resolveRgsVersion(workspaceId);
+    const { q, side, limit } = req.query as unknown as z.infer<typeof RgsSearchQuery>;
+    const rows = (await searchRgsAccounts({ version, q, limit: limit ?? 25 })) as {
+      code: string;
+      description: string;
+      level: number;
+      isBalanceSheet: boolean;
+      isProfitLoss: boolean;
+      dc: string | null;
+    }[];
+    const filtered = side
+      ? rows.filter((r) => (side === "B" ? r.isBalanceSheet : r.isProfitLoss))
+      : rows;
+    res.json({
+      version,
+      results: filtered.map((r) => ({
+        code: r.code,
+        description: r.description,
+        level: r.level,
+        isBalanceSheet: r.isBalanceSheet,
+        isProfitLoss: r.isProfitLoss,
+      })),
     });
   }),
 );
