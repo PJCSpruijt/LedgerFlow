@@ -90,6 +90,45 @@ function groupLabel(field: GroupField, value: string): string {
 /** Left padding (rem) for a row at a given tree level. Grootboekrekening = -1. */
 const indentRem = (level: number) => 0.75 + (level + 1) * 1.1;
 
+interface Filters {
+  codeFrom: string;
+  codeTo: string;
+  account: string;
+  relation: string;
+  reference: string;
+  docType: string;
+}
+const EMPTY_FILTERS: Filters = {
+  codeFrom: "",
+  codeTo: "",
+  account: "",
+  relation: "",
+  reference: "",
+  docType: "",
+};
+const ci = (s: string | null | undefined, q: string) =>
+  (s ?? "").toLowerCase().includes(q.toLowerCase());
+
+/** True when a line passes the active filter bar. Code supports a single value
+ *  (prefix/contains) or a from–to range (lexicographic). */
+function matchRow(t: Tx, f: Filters): boolean {
+  const code = t.glAccountCode || "";
+  const lo = f.codeFrom.trim();
+  const hi = f.codeTo.trim();
+  if (lo && hi) {
+    if (!(code >= lo && code <= hi)) return false;
+  } else if (lo) {
+    if (!code.startsWith(lo) && !code.includes(lo)) return false;
+  } else if (hi) {
+    if (!(code <= hi)) return false;
+  }
+  if (f.account.trim() && !ci(t.glAccountName, f.account.trim())) return false;
+  if (f.relation.trim() && !ci(t.contactName, f.relation.trim())) return false;
+  if (f.reference.trim() && !ci(t.reference, f.reference.trim())) return false;
+  if (f.docType.trim() && !ci(t.documentType, f.docType.trim())) return false;
+  return true;
+}
+
 function ConfidenceBadge({ c }: { c?: "EXACT" | "INFERRED" | "REQUIRED" }) {
   if (!c) return null;
   const map = {
@@ -106,6 +145,9 @@ export function TransactionsPage() {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [sort, setSort] = useState<SortRule[]>([]);
   const [groupBy, setGroupBy] = useState<GroupField[]>([]);
+  const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS);
+  const [showFilters, setShowFilters] = useState(false);
+  const filterActive = Object.values(filters).some((v) => v.trim());
   const pdfModal = usePdfModal();
   const navigate = useNavigate();
   const [sp] = useSearchParams();
@@ -125,6 +167,7 @@ export function TransactionsPage() {
   const groups = useMemo<Group[]>(() => {
     const byCode = new Map<string, Group>();
     for (const t of data?.rows ?? []) {
+      if (!matchRow(t, filters)) continue;
       const code = t.glAccountCode || "—";
       const g =
         byCode.get(code) ?? { code, name: t.glAccountName || "(geen grootboekrekening)", lines: [], total: 0 };
@@ -147,7 +190,7 @@ export function TransactionsPage() {
     return [...byCode.values()].sort((a, b) =>
       a.code === "—" ? 1 : b.code === "—" ? -1 : a.code.localeCompare(b.code),
     );
-  }, [data, sort]);
+  }, [data, sort, filters]);
 
   const shownGroups = codeFilter ? groups.filter((g) => g.code === codeFilter) : groups;
 
@@ -194,6 +237,7 @@ export function TransactionsPage() {
     return i === -1 ? null : { field: col.group as GroupField, order: i + 1 };
   };
 
+  const shownLines = shownGroups.reduce((s, g) => s + g.lines.length, 0);
   const totalLines = data?.rows.length ?? 0;
   const filteredName = codeFilter ? groups.find((g) => g.code === codeFilter)?.name : null;
 
@@ -210,6 +254,12 @@ export function TransactionsPage() {
         </div>
         {data && (
           <div className="flex gap-3 text-xs items-center">
+            <button
+              className={`lf-link ${filterActive ? "font-semibold" : ""}`}
+              onClick={() => setShowFilters((v) => !v)}
+            >
+              Filters{filterActive ? " ●" : ""} {showFilters ? "▴" : "▾"}
+            </button>
             <button className="lf-link" onClick={() => setExpanded(new Set(shownGroups.map((g) => g.code)))}>
               Alles uitklappen
             </button>
@@ -219,6 +269,67 @@ export function TransactionsPage() {
           </div>
         )}
       </div>
+
+      {data && showFilters && (
+        <div className="lf-card flex flex-wrap items-end gap-3 text-sm">
+          <div>
+            <label className="lf-label">Code van</label>
+            <input
+              className="lf-input font-mono w-24"
+              placeholder="01300"
+              value={filters.codeFrom}
+              onChange={(e) => setFilters({ ...filters, codeFrom: e.target.value })}
+            />
+          </div>
+          <div>
+            <label className="lf-label">tot</label>
+            <input
+              className="lf-input font-mono w-24"
+              placeholder="01400"
+              value={filters.codeTo}
+              onChange={(e) => setFilters({ ...filters, codeTo: e.target.value })}
+            />
+          </div>
+          <div>
+            <label className="lf-label">Grootboekrekening</label>
+            <input
+              className="lf-input w-44"
+              placeholder="naam bevat…"
+              value={filters.account}
+              onChange={(e) => setFilters({ ...filters, account: e.target.value })}
+            />
+          </div>
+          <div>
+            <label className="lf-label">Relatie</label>
+            <input
+              className="lf-input w-40"
+              value={filters.relation}
+              onChange={(e) => setFilters({ ...filters, relation: e.target.value })}
+            />
+          </div>
+          <div>
+            <label className="lf-label">Referentie</label>
+            <input
+              className="lf-input w-32"
+              value={filters.reference}
+              onChange={(e) => setFilters({ ...filters, reference: e.target.value })}
+            />
+          </div>
+          <div>
+            <label className="lf-label">Documenttype</label>
+            <input
+              className="lf-input w-40"
+              value={filters.docType}
+              onChange={(e) => setFilters({ ...filters, docType: e.target.value })}
+            />
+          </div>
+          {filterActive && (
+            <button className="lf-link" onClick={() => setFilters(EMPTY_FILTERS)}>
+              Wissen
+            </button>
+          )}
+        </div>
+      )}
 
       {codeFilter && (
         <div className="lf-card py-2 px-3 text-sm flex items-center gap-2">
@@ -248,7 +359,8 @@ export function TransactionsPage() {
         <div className="lf-card p-0">
           <div className="px-4 py-2 text-xs text-slate-500 border-b border-slate-100 flex items-center gap-3">
             <span>
-              {shownGroups.length} grootboekrekening{shownGroups.length === 1 ? "" : "en"} · {totalLines} regels
+              {shownGroups.length} grootboekrekening{shownGroups.length === 1 ? "" : "en"} ·{" "}
+              {filterActive ? `${shownLines} van ${totalLines}` : totalLines} regels
             </span>
             {groupBy.length > 0 && (
               <span className="text-slate-400">
