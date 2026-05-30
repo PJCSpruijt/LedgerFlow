@@ -1,4 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
+import { useNavigate } from "react-router-dom";
 import { useScope } from "../contexts/ScopeContext";
 import { api, ApiError } from "../services/api";
 
@@ -20,6 +21,7 @@ const TITLES: Record<Mode, string> = {
 
 export function RelationsView({ mode }: { mode: Mode }) {
   const { entity } = useScope();
+  const navigate = useNavigate();
   const wantDebtors = mode !== "payables";
   const wantCreditors = mode !== "receivables";
 
@@ -67,7 +69,9 @@ export function RelationsView({ mode }: { mode: Mode }) {
 
       {entity && !loading && !err && (
         <div className="lf-card">
-          <div className="text-xs text-slate-500 mb-2">{contacts.length} relaties</div>
+          <div className="text-xs text-slate-500 mb-2">
+            {contacts.length} relaties · klik een relatie voor de transacties
+          </div>
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
@@ -79,7 +83,12 @@ export function RelationsView({ mode }: { mode: Mode }) {
               </thead>
               <tbody>
                 {contacts.map((c) => (
-                  <tr key={c.id} className="border-b border-slate-100">
+                  <tr
+                    key={c.id}
+                    className="border-b border-slate-100 cursor-pointer hover:bg-slate-50"
+                    title="Bekijk transacties van deze relatie"
+                    onClick={() => navigate(`/data/transactions?relation=${encodeURIComponent(c.name)}`)}
+                  >
                     <td className="py-1.5 pr-4 font-mono">{c.code ?? ""}</td>
                     <td className="py-1.5 pr-4">{c.name}</td>
                     {mode === "all" && (

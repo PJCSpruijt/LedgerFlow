@@ -172,6 +172,7 @@ export function TransactionsPage() {
   const navigate = useNavigate();
   const [sp] = useSearchParams();
   const codeFilter = sp.get("code");
+  const relationFilter = sp.get("relation");
 
   const { data, isLoading, isError, error } = useQuery({
     queryKey: ["transactions", entity?.id, dateFrom, dateTo],
@@ -188,6 +189,7 @@ export function TransactionsPage() {
     const byCode = new Map<string, Group>();
     for (const t of data?.rows ?? []) {
       if (!matchRow(t, filters)) continue;
+      if (relationFilter && (t.contactName ?? "") !== relationFilter) continue;
       const code = t.glAccountCode || "—";
       const g =
         byCode.get(code) ?? { code, name: t.glAccountName || "(geen grootboekrekening)", lines: [], total: 0 };
@@ -210,9 +212,15 @@ export function TransactionsPage() {
     return [...byCode.values()].sort((a, b) =>
       a.code === "—" ? 1 : b.code === "—" ? -1 : a.code.localeCompare(b.code),
     );
-  }, [data, sort, filters]);
+  }, [data, sort, filters, relationFilter]);
 
   const shownGroups = codeFilter ? groups.filter((g) => g.code === codeFilter) : groups;
+
+  // When filtering by relation, open all matching groups so the lines show.
+  useEffect(() => {
+    if (relationFilter) setExpanded(new Set(groups.map((g) => g.code)));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [relationFilter, groups]);
 
   const toggle = (code: string) =>
     setExpanded((prev) => {
@@ -392,6 +400,21 @@ export function TransactionsPage() {
         </div>
       )}
 
+      {relationFilter && (
+        <div className="lf-card py-2 px-3 text-sm flex items-center gap-2">
+          <span className="text-slate-500">Gefilterd op relatie</span>
+          <span className="text-slate-700 font-medium">{relationFilter}</span>
+          <span className="ml-auto flex items-center gap-3">
+            <button className="lf-link" onClick={() => navigate("/data/transactions")}>
+              Filter wissen
+            </button>
+            <button className="lf-btn-secondary" onClick={() => navigate("/data/relations")}>
+              ← Terug naar Relaties
+            </button>
+          </span>
+        </div>
+      )}
+
       {!entity && <div className="lf-card max-w-2xl">Selecteer een administratie in de bovenbalk.</div>}
       {entity && isLoading && <div className="lf-card">Transacties laden…</div>}
       {isError && (
@@ -405,7 +428,10 @@ export function TransactionsPage() {
           <div className="px-4 py-2 text-xs text-slate-500 border-b border-slate-100 flex items-center gap-3">
             <span>
               {shownGroups.length} grootboekrekening{shownGroups.length === 1 ? "" : "en"} ·{" "}
-              {filterActive ? `${shownLines} van ${totalLines}` : totalLines} regels
+              {filterActive || relationFilter || codeFilter
+                ? `${shownLines} van ${totalLines}`
+                : totalLines}{" "}
+              regels
             </span>
             {groupBy.length > 0 && (
               <span className="text-slate-400">
