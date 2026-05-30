@@ -60,12 +60,12 @@ interface ColumnDef {
 
 const COLUMNS: ColumnDef[] = [
   { key: "date", label: "Datum", group: "date" },
-  { key: "amount", label: "Bedrag", align: "right" },
-  { key: "original", label: "Origineel", align: "right" },
   { key: "contactName", label: "Relatie", group: "contactName" },
   { key: "reference", label: "Referentie" },
   { key: "documentType", label: "Documenttype", group: "documentType" },
   { key: "description", label: "Omschrijving" },
+  { key: "original", label: "Origineel", align: "right" },
+  { key: "amount", label: "Bedrag", align: "right" },
 ];
 
 /** Default column widths (px). Resizable; persisted to localStorage. */
@@ -670,14 +670,6 @@ function LineRow({
       <td className="py-1.5 px-3 truncate" style={{ paddingLeft: `${indentRem(level)}rem` }}>
         {t.date}
       </td>
-      <td className={`py-1.5 px-3 text-right whitespace-nowrap ${(t.reportingAmount ?? t.amount) < 0 ? "text-red-600" : ""}`}>
-        {formatMoney(t.reportingAmount ?? t.amount, t.reportingCurrency ?? currency)}
-      </td>
-      <td className="py-1.5 px-3 text-right whitespace-nowrap text-slate-400">
-        {t.reportingCurrency && t.currency && t.reportingCurrency !== t.currency
-          ? formatMoney(t.amount, t.currency)
-          : ""}
-      </td>
       <td className="py-1.5 px-3 truncate" title={t.contactName ?? ""}>
         {t.contactName ?? ""}
       </td>
@@ -714,6 +706,14 @@ function LineRow({
       </td>
       <td className="py-1.5 px-3 truncate" title={t.description}>
         {t.description}
+      </td>
+      <td className="py-1.5 px-3 text-right whitespace-nowrap text-slate-400">
+        {t.reportingCurrency && t.currency && t.reportingCurrency !== t.currency
+          ? formatMoney(t.amount, t.currency)
+          : ""}
+      </td>
+      <td className={`py-1.5 px-3 text-right whitespace-nowrap ${(t.reportingAmount ?? t.amount) < 0 ? "text-red-600" : ""}`}>
+        {formatMoney(t.reportingAmount ?? t.amount, t.reportingCurrency ?? currency)}
       </td>
     </tr>
   );
