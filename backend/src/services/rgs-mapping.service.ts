@@ -219,25 +219,43 @@ export async function applyRgsMappings<T extends TransactionLine | TrialBalanceL
   const mappings = await getActiveMappings(entityId);
   if (mappings.length === 0) return lines;
 
+  // Use the effective (loaded) version for taxonomy lookups — the workspace's
+  // configured version may not be imported yet (resolveRgsVersion falls back).
+  const version = await resolveRgsVersion(workspaceId);
   const byCode = new Map(mappings.map((m) => [m.sourceAccountCode, m]));
   // Resolve rgsType for the mapped codes in one query.
   const codes = [...new Set(mappings.map((m) => m.rgsCode).filter((c): c is string => !!c))];
   const rgsRows = codes.length
     ? await prisma.rgsAccount.findMany({
-        where: { version: settings.rgsVersion, code: { in: codes } },
+        where: { version, code: { in: codes } },
         select: { code: true, rgsType: true },
       })
     : [];
   const typeByCode = new Map(rgsRows.map((r) => [r.code, r.rgsType]));
 
+  // Resolve the hoofdrubriek (level-2) description for each mapped code, so
+  // reporting can group on "Vorderingen", "Personeelskosten", … (B/W + 3 letters).
+  const groupCode = (c: string) => (c.length >= 4 ? c.slice(0, 4) : c);
+  const groupCodes = [...new Set(codes.map(groupCode))];
+  const groupRows = groupCodes.length
+    ? await prisma.rgsAccount.findMany({
+        where: { version, code: { in: groupCodes } },
+        select: { code: true, description: true },
+      })
+    : [];
+  const groupNameByCode = new Map(groupRows.map((r) => [r.code, r.description]));
+
   return lines.map((l) => {
     const m = byCode.get(l.glAccountCode);
     if (!m) return l;
+    const gc = m.rgsCode ? groupCode(m.rgsCode) : null;
     return {
       ...l,
       rgsCode: m.rgsCode ?? null,
       rgsType: m.rgsCode ? (typeByCode.get(m.rgsCode) ?? null) : null,
       finCategory: m.finCategory?.key ?? null,
+      rgsGroupCode: gc,
+      rgsGroupName: gc ? (groupNameByCode.get(gc) ?? null) : null,
     };
   });
 }

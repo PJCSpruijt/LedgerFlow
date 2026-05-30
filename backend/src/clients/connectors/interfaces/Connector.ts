@@ -26,6 +26,10 @@ export interface TrialBalanceLine {
   rgsCode?: string | null;
   rgsType?: string | null;
   finCategory?: string | null;
+  /** RGS hoofdrubriek (level-2 ancestor) code, e.g. "BVor", "WPer". */
+  rgsGroupCode?: string | null;
+  /** RGS hoofdrubriek description, e.g. "Vorderingen", "Personeelskosten". */
+  rgsGroupName?: string | null;
 }
 
 export interface TransactionLine {
@@ -70,6 +74,8 @@ export interface TransactionLine {
   rgsType?: string | null;
   /** FIN//HUB semantic category key (e.g. "MRR"), layered on top of RGS. */
   finCategory?: string | null;
+  rgsGroupCode?: string | null;
+  rgsGroupName?: string | null;
 
   /* ---- Reporting-currency conversion (set by the FX step in the route) ---- */
   /** `amount` converted to the requested reporting currency at the line's date. */
