@@ -3,10 +3,14 @@ import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 import { isAdminRole, useScope, VIEW_LABELS, type ViewType } from "../contexts/ScopeContext";
 import { api } from "../services/api";
-import { MODULES, type ModuleDef } from "../navigation/navConfig";
+import { MODULES, type ModuleDef, type SubPage } from "../navigation/navConfig";
 import { useContextUrlSync } from "../navigation/useContextUrlSync";
 import { UserMenu } from "../components/UserMenu";
 import { DateRangePicker } from "../components/DateRangePicker";
+import { Placeholder } from "../pages/Placeholder";
+
+/** Scaffold subpages (not yet built) render a Placeholder; hidden from non-admins. */
+const isScaffold = (sp: SubPage) => sp.element.type === Placeholder;
 
 const VIEW_TYPES = Object.keys(VIEW_LABELS) as ViewType[];
 
@@ -43,8 +47,14 @@ export function AppShell() {
   useContextUrlSync();
 
   const isPlatformAdmin = user?.platformRole === "PLATFORM_ADMIN";
+  // Subpages a normal user may see: scaffolds are hidden unless platform admin.
+  const visibleSubpages = (m: ModuleDef): SubPage[] =>
+    isPlatformAdmin ? m.subpages : m.subpages.filter((sp) => !isScaffold(sp));
   // Modules the user may reach (for routing + sub-nav), incl. hidden ones.
-  const accessibleModules = MODULES.filter((m) => !m.platformAdminOnly || isPlatformAdmin);
+  // A module with only scaffold subpages is hidden from non-admins entirely.
+  const accessibleModules = MODULES.filter(
+    (m) => (!m.platformAdminOnly || isPlatformAdmin) && visibleSubpages(m).length > 0,
+  );
   // Sidebar split: regular modules at the top, pinned ones (Platform Admin) at
   // the bottom; modules flagged hideFromSidebar (Instellingen) live in the user menu.
   const sidebarTop = accessibleModules.filter((m) => !m.hideFromSidebar && !m.pinBottom);
@@ -168,13 +178,23 @@ export function AppShell() {
         <aside className="w-52 shrink-0 bg-white border-r border-slate-200 py-3 hidden md:flex flex-col justify-between">
           <nav className="px-2 space-y-1">
             {sidebarTop.map((m) => (
-              <ModuleLink key={m.key} m={m} active={activeModule?.key === m.key} />
+              <ModuleLink
+                key={m.key}
+                m={m}
+                active={activeModule?.key === m.key}
+                firstPath={visibleSubpages(m)[0]?.path ?? m.subpages[0]!.path}
+              />
             ))}
           </nav>
           {sidebarBottom.length > 0 && (
             <nav className="px-2 space-y-1 pt-3 mt-3 border-t border-slate-100">
               {sidebarBottom.map((m) => (
-                <ModuleLink key={m.key} m={m} active={activeModule?.key === m.key} />
+                <ModuleLink
+                  key={m.key}
+                  m={m}
+                  active={activeModule?.key === m.key}
+                  firstPath={visibleSubpages(m)[0]?.path ?? m.subpages[0]!.path}
+                />
               ))}
             </nav>
           )}
@@ -182,28 +202,33 @@ export function AppShell() {
 
         {/* Main: sub-nav + content */}
         <main className="flex-1 min-w-0 overflow-y-auto">
-          {activeModule && activeModule.subpages.length > 1 && (
-            <div className="bg-white border-b border-slate-200 px-6">
-              <div className="flex gap-1 overflow-x-auto">
-                {activeModule.subpages.map((sp) => (
-                  <NavLink
-                    key={sp.path}
-                    to={`${activeModule.basePath}/${sp.path}`}
-                    className={({ isActive }) =>
-                      `px-3 py-3 text-sm whitespace-nowrap border-b-2 -mb-px ${
-                        isActive
-                          ? "border-brand-600 text-brand-700 font-medium"
-                          : "border-transparent text-slate-500 hover:text-slate-800"
-                      }`
-                    }
-                  >
-                    {sp.label}
-                  </NavLink>
-                ))}
-              </div>
-            </div>
-          )}
-          <div className="max-w-6xl mx-auto px-6 py-6">
+          {activeModule &&
+            (() => {
+              const subs = visibleSubpages(activeModule);
+              if (subs.length <= 1) return null;
+              return (
+                <div className="bg-white border-b border-slate-200 px-6">
+                  <div className="flex gap-1 overflow-x-auto">
+                    {subs.map((sp) => (
+                      <NavLink
+                        key={sp.path}
+                        to={`${activeModule.basePath}/${sp.path}`}
+                        className={({ isActive }) =>
+                          `px-3 py-3 text-sm whitespace-nowrap border-b-2 -mb-px ${
+                            isActive
+                              ? "border-brand-600 text-brand-700 font-medium"
+                              : "border-transparent text-slate-500 hover:text-slate-800"
+                          }`
+                        }
+                      >
+                        {sp.label}
+                      </NavLink>
+                    ))}
+                  </div>
+                </div>
+              );
+            })()}
+          <div className="max-w-[1800px] mx-auto px-6 py-6">
             <Outlet />
           </div>
         </main>
@@ -212,10 +237,10 @@ export function AppShell() {
   );
 }
 
-function ModuleLink({ m, active }: { m: ModuleDef; active: boolean }) {
+function ModuleLink({ m, active, firstPath }: { m: ModuleDef; active: boolean; firstPath: string }) {
   return (
     <NavLink
-      to={`${m.basePath}/${m.subpages[0]!.path}`}
+      to={`${m.basePath}/${firstPath}`}
       className={`flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium ${
         active ? "bg-brand-50 text-brand-700" : "text-slate-600 hover:bg-slate-100"
       }`}
