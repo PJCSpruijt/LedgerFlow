@@ -233,6 +233,9 @@ model Subscription {
   planId                String?
   status                SubscriptionStatus @default(NONE)
   validUntil            DateTime?
+  // True when the customer has cancelled but the paid period is still running:
+  // access continues until validUntil, then Stripe stops the incasso.
+  cancelAtPeriodEnd     Boolean            @default(false)
   createdAt             DateTime           @default(now())
   updatedAt             DateTime           @updatedAt
 
