@@ -3,6 +3,9 @@ import { DashboardPage } from "../pages/DashboardPage";
 import { YukiPage } from "../pages/YukiPage";
 import { ExportsPage } from "../pages/ExportsPage";
 import { VatMappingPage } from "../pages/VatMappingPage";
+import { RgsMappingPage } from "../pages/RgsMappingPage";
+import { RgsTaxonomyPage } from "../pages/RgsTaxonomyPage";
+import { RgsSettingsPage } from "../pages/RgsSettingsPage";
 import { TransactionsPage } from "../pages/TransactionsPage";
 import { GeneralLedgerPage } from "../pages/GeneralLedgerPage";
 import { RelationsView } from "../pages/RelationsPage";
@@ -85,6 +88,7 @@ export const MODULES: ModuleDef[] = [
     icon: "🔀",
     subpages: [
       { path: "account-tax", label: "Grootboek & btw", element: <VatMappingPage /> },
+      { path: "rgs", label: "Rekeningkoppelingen (RGS)", element: <RgsMappingPage /> },
       { path: "universal-coa", label: "Universeel rekeningschema", element: soon("Universeel rekeningschema") },
       { path: "relations", label: "Relatiekoppelingen", element: soon("Relatiekoppelingen") },
       { path: "cashflow", label: "Kasstroomkoppelingen", element: soon("Kasstroomkoppelingen") },
@@ -140,6 +144,7 @@ export const MODULES: ModuleDef[] = [
     hideFromSidebar: true,
     subpages: [
       { path: "settings", label: "Algemeen", element: <SettingsPage /> },
+      { path: "rgs", label: "RGS / normalisatie", element: <RgsSettingsPage /> },
       { path: "billing", label: "Facturatie & abonnement", element: <BillingPage /> },
       { path: "notifications", label: "Meldingen", element: soon("Meldingen") },
       { path: "security", label: "Beveiliging", element: soon("Beveiliging") },
@@ -157,6 +162,7 @@ export const MODULES: ModuleDef[] = [
       { path: "users", label: "Gebruikers", element: <AdminUsersPage /> },
       { path: "plans", label: "Plannen & licenties", element: <AdminPlansPage /> },
       { path: "usage", label: "Statistieken & API-gebruik", element: <AdminStatsPage /> },
+      { path: "rgs", label: "RGS-taxonomie", element: <RgsTaxonomyPage /> },
       { path: "connector-registry", label: "Connector-register", element: soon("Connector-register") },
       { path: "connector-health", label: "Connector-status", element: soon("Connector-status") },
       { path: "jobs", label: "Achtergrondtaken", element: soon("Achtergrondtaken") },
