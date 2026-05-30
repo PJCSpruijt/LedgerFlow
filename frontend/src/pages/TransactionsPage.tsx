@@ -68,15 +68,17 @@ const COLUMNS: ColumnDef[] = [
   { key: "amount", label: "Bedrag", align: "right" },
 ];
 
-/** Default column widths (px). Resizable; persisted to localStorage. */
+/** Default column widths (px). Resizable; persisted to localStorage.
+ *  Omschrijving is the flexible filler column (no fixed width — absorbs the
+ *  remaining table width), so it has no entry used in the colgroup. */
 const DEFAULT_WIDTHS: Record<SortKey, number> = {
-  date: 110,
-  amount: 120,
+  date: 150,
+  amount: 130,
   original: 120,
-  contactName: 200,
-  reference: 120,
-  documentType: 160,
-  description: 340,
+  contactName: 220,
+  reference: 130,
+  documentType: 170,
+  description: 360,
 };
 const WIDTHS_LS = "fh_tx_col_widths";
 
@@ -110,8 +112,9 @@ function groupLabel(field: GroupField, value: string): string {
   return value;
 }
 
-/** Left padding (rem) for a row at a given tree level. Grootboekrekening = -1. */
-const indentRem = (level: number) => 0.75 + (level + 1) * 1.1;
+/** Left padding (rem) for a row at a given tree level. Grootboekrekening = -1.
+ *  Kept small so the Datum column isn't eaten by indentation. */
+const indentRem = (level: number) => 0.5 + level * 1.0;
 
 interface Filters {
   codeFrom: string;
@@ -227,6 +230,24 @@ export function TransactionsPage() {
     );
   }, [data, sort, filters, relationFilter]);
 
+  // Distinct values from the loaded rows → filter autocomplete suggestions.
+  const options = useMemo(() => {
+    const codes = new Set<string>();
+    const accounts = new Set<string>();
+    const relations = new Set<string>();
+    const refs = new Set<string>();
+    const docs = new Set<string>();
+    for (const t of data?.rows ?? []) {
+      if (t.glAccountCode) codes.add(t.glAccountCode);
+      if (t.glAccountName) accounts.add(t.glAccountName);
+      if (t.contactName) relations.add(t.contactName);
+      if (t.reference) refs.add(t.reference);
+      if (t.documentType) docs.add(t.documentType);
+    }
+    const top = (s: Set<string>) => [...s].sort((a, b) => a.localeCompare(b, undefined, { numeric: true })).slice(0, 500);
+    return { codes: top(codes), accounts: top(accounts), relations: top(relations), refs: top(refs), docs: top(docs) };
+  }, [data]);
+
   const shownGroups = codeFilter ? groups.filter((g) => g.code === codeFilter) : groups;
 
   // When filtering by relation, open all matching groups so the lines show.
@@ -301,7 +322,10 @@ export function TransactionsPage() {
     document.addEventListener("mousemove", onMove);
     document.addEventListener("mouseup", onUp);
   };
-  const tableWidth = COLUMNS.reduce((s, c) => s + widths[c.key], 0);
+  // Omschrijving has no fixed width (it flexes to fill); the table stretches to
+  // 100% and only scrolls when the fixed columns + a description minimum don't fit.
+  const minTableWidth =
+    COLUMNS.filter((c) => c.key !== "description").reduce((s, c) => s + widths[c.key], 0) + 260;
 
   const shownLines = shownGroups.reduce((s, g) => s + g.lines.length, 0);
   const totalLines = data?.rows.length ?? 0;
@@ -338,10 +362,38 @@ export function TransactionsPage() {
 
       {data && showFilters && (
         <div className="lf-card flex flex-wrap items-end gap-3 text-sm">
+          {/* Autocomplete suggestions from the loaded data; free text also allowed. */}
+          <datalist id="tx-codes">
+            {options.codes.map((v) => (
+              <option key={v} value={v} />
+            ))}
+          </datalist>
+          <datalist id="tx-accounts">
+            {options.accounts.map((v) => (
+              <option key={v} value={v} />
+            ))}
+          </datalist>
+          <datalist id="tx-relations">
+            {options.relations.map((v) => (
+              <option key={v} value={v} />
+            ))}
+          </datalist>
+          <datalist id="tx-refs">
+            {options.refs.map((v) => (
+              <option key={v} value={v} />
+            ))}
+          </datalist>
+          <datalist id="tx-docs">
+            {options.docs.map((v) => (
+              <option key={v} value={v} />
+            ))}
+          </datalist>
+
           <div>
             <label className="lf-label">Code van</label>
             <input
-              className="lf-input font-mono w-24"
+              className="lf-input font-mono w-28"
+              list="tx-codes"
               placeholder="01300"
               value={filters.codeFrom}
               onChange={(e) => setFilters({ ...filters, codeFrom: e.target.value })}
@@ -350,7 +402,8 @@ export function TransactionsPage() {
           <div>
             <label className="lf-label">tot</label>
             <input
-              className="lf-input font-mono w-24"
+              className="lf-input font-mono w-28"
+              list="tx-codes"
               placeholder="01400"
               value={filters.codeTo}
               onChange={(e) => setFilters({ ...filters, codeTo: e.target.value })}
@@ -359,7 +412,8 @@ export function TransactionsPage() {
           <div>
             <label className="lf-label">Grootboekrekening</label>
             <input
-              className="lf-input w-44"
+              className="lf-input w-48"
+              list="tx-accounts"
               placeholder="naam bevat…"
               value={filters.account}
               onChange={(e) => setFilters({ ...filters, account: e.target.value })}
@@ -368,7 +422,8 @@ export function TransactionsPage() {
           <div>
             <label className="lf-label">Relatie</label>
             <input
-              className="lf-input w-40"
+              className="lf-input w-44"
+              list="tx-relations"
               value={filters.relation}
               onChange={(e) => setFilters({ ...filters, relation: e.target.value })}
             />
@@ -376,7 +431,8 @@ export function TransactionsPage() {
           <div>
             <label className="lf-label">Referentie</label>
             <input
-              className="lf-input w-32"
+              className="lf-input w-36"
+              list="tx-refs"
               value={filters.reference}
               onChange={(e) => setFilters({ ...filters, reference: e.target.value })}
             />
@@ -384,7 +440,8 @@ export function TransactionsPage() {
           <div>
             <label className="lf-label">Documenttype</label>
             <input
-              className="lf-input w-40"
+              className="lf-input w-44"
+              list="tx-docs"
               value={filters.docType}
               onChange={(e) => setFilters({ ...filters, docType: e.target.value })}
             />
@@ -467,10 +524,13 @@ export function TransactionsPage() {
           </div>
           {/* Scroll within the frame; top + side menu stay fixed. Sticky header. */}
           <div className="overflow-auto max-h-[calc(100vh-220px)]">
-            <table className="text-sm border-collapse table-fixed" style={{ width: tableWidth }}>
+            <table className="w-full text-sm border-collapse table-fixed" style={{ minWidth: minTableWidth }}>
               <colgroup>
                 {COLUMNS.map((col) => (
-                  <col key={col.key} style={{ width: widths[col.key] }} />
+                  <col
+                    key={col.key}
+                    style={col.key === "description" ? undefined : { width: widths[col.key] }}
+                  />
                 ))}
               </colgroup>
               <thead className="sticky top-0 z-10 bg-slate-50">
