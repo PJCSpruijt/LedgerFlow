@@ -71,6 +71,19 @@ export function BillingPage() {
     }
   };
 
+  const refreshSub = async () => {
+    setErr(null);
+    setBusy(true);
+    try {
+      await api("/api/billing/refresh", { method: "POST" });
+      await loadSub();
+    } catch (e) {
+      setErr(e instanceof ApiError ? e.message : "Verversen mislukt");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   useEffect(() => {
     void (async () => {
       try {
@@ -139,6 +152,19 @@ export function BillingPage() {
             {sub.cancelAtPeriodEnd ? "Toegang tot" : "Geldig tot"}{" "}
             {new Date(sub.validUntil).toLocaleDateString("nl-NL")}
           </div>
+        )}
+        {sub?.stripeManaged && isWorkspaceAdmin && (
+          <button className="lf-link text-xs mt-2" onClick={refreshSub} disabled={busy}>
+            {busy ? "Bezig…" : "Status verversen"}
+          </button>
+        )}
+        {sub?.status === "INCOMPLETE" && (
+          <p className="text-xs text-amber-700 mt-2 max-w-md">
+            Status "incompleet" betekent dat de eerste betaling nog niet is bevestigd. Klik op{" "}
+            <span className="font-medium">Status verversen</span> om de actuele status bij Stripe op
+            te halen; is de betaling toch mislukt, kies dan opnieuw een plan om de betaling af te
+            ronden.
+          </p>
         )}
 
         {sub?.stripeManaged && sub.cancelAtPeriodEnd && (

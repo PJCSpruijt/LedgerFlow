@@ -159,6 +159,24 @@ billingRouter.post(
   }),
 );
 
+/** Re-sync the local subscription status from Stripe (truth source). Fixes a
+ *  status left stale by out-of-order webhook delivery. Admin only. */
+billingRouter.post(
+  "/refresh",
+  requireAuth,
+  requireScope,
+  requireScopeRole(ScopedRole.WORKSPACE_ADMIN),
+  asyncHandler(async (req, res) => {
+    const workspaceId = req.scope!.workspaceId;
+    const sub = await prisma.subscription.findUnique({ where: { workspaceId } });
+    if (!sub?.stripeSubscriptionId) throw new BadRequestError("Geen Stripe-abonnement om te verversen");
+    const live = await stripe.subscriptions.retrieve(sub.stripeSubscriptionId);
+    await upsertSubscription(workspaceId, live, live.customer as string | null);
+    const updated = await prisma.subscription.findUnique({ where: { workspaceId } });
+    res.json({ status: updated?.status, validUntil: updated?.validUntil });
+  }),
+);
+
 /** Undo a pending cancellation (keep the subscription + incasso running). */
 billingRouter.post(
   "/resume",
@@ -243,11 +261,20 @@ async function handleStripeEvent(event: import("stripe").Stripe.Event): Promise<
     case "customer.subscription.created":
     case "customer.subscription.updated":
     case "customer.subscription.deleted": {
-      const sub = event.data.object as import("stripe").Stripe.Subscription;
-      const workspaceId = sub.metadata?.workspaceId;
+      const evtSub = event.data.object as import("stripe").Stripe.Subscription;
+      const workspaceId = evtSub.metadata?.workspaceId;
       if (!workspaceId) {
-        logger.warn({ subId: sub.id }, "Subscription event without workspaceId metadata");
+        logger.warn({ subId: evtSub.id }, "Subscription event without workspaceId metadata");
         return;
+      }
+      // Stripe does NOT guarantee webhook ordering. Re-fetch the live subscription
+      // so a late-delivered older event (e.g. "incomplete") can't overwrite a
+      // newer status (e.g. "active"). Fall back to the event payload on failure.
+      let sub = evtSub;
+      try {
+        sub = await stripe.subscriptions.retrieve(evtSub.id);
+      } catch (e) {
+        logger.warn({ err: e, subId: evtSub.id }, "Could not re-fetch subscription; using event payload");
       }
       await upsertSubscription(workspaceId, sub, sub.customer as string | null);
       break;
