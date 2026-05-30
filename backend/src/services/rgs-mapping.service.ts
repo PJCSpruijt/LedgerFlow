@@ -20,15 +20,13 @@ const DEFAULT_FIN_CATEGORIES: { key: string; label: string; kind: string }[] = [
 
 /** FIN categories visible to a workspace: platform defaults + the workspace's own. */
 export async function listFinCategories(workspaceId: string) {
-  const existing = await prisma.finSemanticCategory.findMany({
-    where: { workspaceId: null },
-    select: { key: true },
-  });
-  const have = new Set(existing.map((c) => c.key));
-  const missing = DEFAULT_FIN_CATEGORIES.filter((d) => !have.has(d.key));
-  if (missing.length) {
+  // Bootstrap the platform defaults ONCE (only when none exist yet). After that
+  // a platform admin's edits/deletes are authoritative — we never re-seed a
+  // removed or renamed default.
+  const defaultCount = await prisma.finSemanticCategory.count({ where: { workspaceId: null } });
+  if (defaultCount === 0) {
     await prisma.finSemanticCategory.createMany({
-      data: missing.map((d, i) => ({ ...d, workspaceId: null, sortOrder: i })),
+      data: DEFAULT_FIN_CATEGORIES.map((d, i) => ({ ...d, workspaceId: null, sortOrder: i })),
     });
   }
   return prisma.finSemanticCategory.findMany({

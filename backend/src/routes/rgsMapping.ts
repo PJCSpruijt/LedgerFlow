@@ -4,6 +4,7 @@ import { prisma } from "../config/prisma.js";
 import { asyncHandler } from "../middleware/asyncHandler.js";
 import { validateBody, validateParams, validateQuery } from "../middleware/validate.js";
 import {
+  isPlatformAdmin,
   requireAuth,
   requireScope,
   requireScopeRole,
@@ -56,9 +57,11 @@ const FinCreateSchema = z.object({
   kind: z.enum(["REVENUE", "COST", "METRIC"]).default("METRIC"),
   description: z.string().max(200).optional(),
   sortOrder: z.coerce.number().int().optional(),
+  // Platform admins may create a platform-wide default (shared by all workspaces).
+  asDefault: z.boolean().optional(),
 });
 
-/** Create a workspace-owned FIN semantic category. */
+/** Create a FIN semantic category (workspace-owned, or platform-default for admins). */
 rgsMappingRouter.post(
   "/fin-categories",
   requireScopeRole(...SCOPE_ADMIN_ROLES),
@@ -67,19 +70,24 @@ rgsMappingRouter.post(
     const workspaceId = req.scope!.workspaceId;
     const body = req.body as z.infer<typeof FinCreateSchema>;
     const key = body.key.toUpperCase();
+    const asDefault = !!body.asDefault && isPlatformAdmin(req);
+    const targetWorkspaceId = asDefault ? null : workspaceId;
+
     const clashDefault = await prisma.finSemanticCategory.findFirst({
       where: { workspaceId: null, key },
       select: { id: true },
     });
     if (clashDefault) throw new BadRequestError("Deze sleutel bestaat al als standaardcategorie");
-    const clashOwn = await prisma.finSemanticCategory.findFirst({
-      where: { workspaceId, key },
-      select: { id: true },
-    });
-    if (clashOwn) throw new BadRequestError("Deze sleutel bestaat al in deze werkruimte");
+    if (!asDefault) {
+      const clashOwn = await prisma.finSemanticCategory.findFirst({
+        where: { workspaceId, key },
+        select: { id: true },
+      });
+      if (clashOwn) throw new BadRequestError("Deze sleutel bestaat al in deze werkruimte");
+    }
     const category = await prisma.finSemanticCategory.create({
       data: {
-        workspaceId,
+        workspaceId: targetWorkspaceId,
         key,
         label: body.label,
         kind: body.kind,
@@ -108,8 +116,14 @@ rgsMappingRouter.patch(
   asyncHandler(async (req, res) => {
     const { id } = req.params as z.infer<typeof FinIdParam>;
     const cat = await prisma.finSemanticCategory.findUnique({ where: { id } });
-    if (!cat || cat.workspaceId !== req.scope!.workspaceId) {
-      throw new BadRequestError("Alleen eigen categorieën kunnen worden bewerkt");
+    const mayEdit =
+      cat &&
+      (cat.workspaceId === req.scope!.workspaceId ||
+        (cat.workspaceId === null && isPlatformAdmin(req)));
+    if (!mayEdit) {
+      throw new BadRequestError(
+        "Alleen eigen categorieën — of standaarden als platformbeheerder — kunnen worden bewerkt",
+      );
     }
     const category = await prisma.finSemanticCategory.update({
       where: { id },
@@ -127,8 +141,14 @@ rgsMappingRouter.delete(
   asyncHandler(async (req, res) => {
     const { id } = req.params as z.infer<typeof FinIdParam>;
     const cat = await prisma.finSemanticCategory.findUnique({ where: { id } });
-    if (!cat || cat.workspaceId !== req.scope!.workspaceId) {
-      throw new BadRequestError("Alleen eigen categorieën kunnen worden verwijderd");
+    const mayDelete =
+      cat &&
+      (cat.workspaceId === req.scope!.workspaceId ||
+        (cat.workspaceId === null && isPlatformAdmin(req)));
+    if (!mayDelete) {
+      throw new BadRequestError(
+        "Alleen eigen categorieën — of standaarden als platformbeheerder — kunnen worden verwijderd",
+      );
     }
     await prisma.finSemanticCategory.delete({ where: { id } });
     res.json({ ok: true });
