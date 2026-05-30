@@ -58,6 +58,17 @@ const COLUMNS: ColumnDef[] = [
   { key: "description", label: "Omschrijving" },
 ];
 
+/** Default column widths (px). Resizable; persisted to localStorage. */
+const DEFAULT_WIDTHS: Record<SortKey, number> = {
+  date: 110,
+  amount: 120,
+  contactName: 200,
+  reference: 120,
+  documentType: 160,
+  description: 340,
+};
+const WIDTHS_LS = "fh_tx_col_widths";
+
 function compareBy(key: SortKey, a: Tx, b: Tx): number {
   if (key === "amount") return a.amount - b.amount;
   if (key === "date") return a.date.localeCompare(b.date);
@@ -148,6 +159,15 @@ export function TransactionsPage() {
   const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS);
   const [showFilters, setShowFilters] = useState(false);
   const filterActive = Object.values(filters).some((v) => v.trim());
+  const [widths, setWidths] = useState<Record<SortKey, number>>(() => {
+    try {
+      const s = localStorage.getItem(WIDTHS_LS);
+      if (s) return { ...DEFAULT_WIDTHS, ...JSON.parse(s) };
+    } catch {
+      /* ignore */
+    }
+    return DEFAULT_WIDTHS;
+  });
   const pdfModal = usePdfModal();
   const navigate = useNavigate();
   const [sp] = useSearchParams();
@@ -236,6 +256,31 @@ export function TransactionsPage() {
     const i = groupBy.indexOf(col.group as GroupField);
     return i === -1 ? null : { field: col.group as GroupField, order: i + 1 };
   };
+
+  // Column resize: drag a header's right edge; min 60px; persisted on mouse-up.
+  const startResize = (key: SortKey, e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const startX = e.clientX;
+    const startW = widths[key];
+    const onMove = (ev: MouseEvent) =>
+      setWidths((prev) => ({ ...prev, [key]: Math.max(60, startW + (ev.clientX - startX)) }));
+    const onUp = () => {
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onUp);
+      setWidths((prev) => {
+        try {
+          localStorage.setItem(WIDTHS_LS, JSON.stringify(prev));
+        } catch {
+          /* ignore */
+        }
+        return prev;
+      });
+    };
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onUp);
+  };
+  const tableWidth = COLUMNS.reduce((s, c) => s + widths[c.key], 0);
 
   const shownLines = shownGroups.reduce((s, g) => s + g.lines.length, 0);
   const totalLines = data?.rows.length ?? 0;
@@ -382,7 +427,12 @@ export function TransactionsPage() {
           </div>
           {/* Scroll within the frame; top + side menu stay fixed. Sticky header. */}
           <div className="overflow-auto max-h-[calc(100vh-220px)]">
-            <table className="w-full text-sm border-collapse">
+            <table className="text-sm border-collapse table-fixed" style={{ width: tableWidth }}>
+              <colgroup>
+                {COLUMNS.map((col) => (
+                  <col key={col.key} style={{ width: widths[col.key] }} />
+                ))}
+              </colgroup>
               <thead className="sticky top-0 z-10 bg-slate-50">
                 <tr className="text-left text-slate-500 border-b border-slate-200">
                   {COLUMNS.map((col) => {
@@ -392,9 +442,15 @@ export function TransactionsPage() {
                     return (
                       <th
                         key={col.key}
-                        className={`py-2 px-3 font-medium whitespace-nowrap ${col.align === "right" ? "text-right" : ""}`}
+                        className={`relative py-2 px-3 font-medium overflow-hidden whitespace-nowrap ${col.align === "right" ? "text-right" : ""}`}
                       >
-                        <span className="inline-flex items-center gap-1">
+                        {/* drag handle on the right edge */}
+                        <span
+                          onMouseDown={(e) => startResize(col.key, e)}
+                          className="absolute top-0 right-0 h-full w-1.5 cursor-col-resize hover:bg-brand-300"
+                          title="Sleep om de kolombreedte aan te passen"
+                        />
+                        <span className="inline-flex items-center gap-1 max-w-full">
                           <button
                             className="select-none hover:text-slate-700 cursor-pointer"
                             onClick={() => onHeaderClick(col.key)}
@@ -495,7 +551,7 @@ function GroupBlock({
   return (
     <>
       <tr className="bg-white border-b border-slate-200 cursor-pointer hover:bg-slate-50" onClick={onToggle}>
-        <td className="py-2 px-3 font-medium whitespace-nowrap">
+        <td colSpan={COLUMNS.length - 1} className="py-2 px-3 font-medium truncate" title={`${g.code} ${g.name}`}>
           <span className="inline-block w-4 text-slate-400">{open ? "▾" : "▸"}</span>
           <span className="font-mono text-slate-500 mr-2">{g.code}</span>
           {g.name}
@@ -504,7 +560,6 @@ function GroupBlock({
         <td className={`py-2 px-3 text-right font-semibold whitespace-nowrap ${g.total < 0 ? "text-red-600" : ""}`}>
           {formatMoney(g.total, currency)}
         </td>
-        <td colSpan={COLUMNS.length - 2} />
       </tr>
       {open && buildRows(g.lines, groupBy, 0, groupBy.length, { currency, onOpenPdf }, `${g.code}/`)}
     </>
@@ -540,14 +595,18 @@ function buildRows(
     const subtotal = sub.reduce((s, t) => s + t.amount, 0);
     out.push(
       <tr key={`${keyPrefix}${v}#h`} className="bg-slate-50/60 border-b border-slate-100">
-        <td className="py-1.5 px-3 whitespace-nowrap text-slate-600" style={{ paddingLeft: `${indentRem(depth)}rem` }}>
+        <td
+          colSpan={COLUMNS.length - 1}
+          className="py-1.5 px-3 truncate text-slate-600"
+          style={{ paddingLeft: `${indentRem(depth)}rem` }}
+          title={groupLabel(field, v)}
+        >
           <span className="font-medium">{groupLabel(field, v)}</span>
           <span className="ml-2 text-xs text-slate-400">({sub.length})</span>
         </td>
         <td className={`py-1.5 px-3 text-right font-medium whitespace-nowrap ${subtotal < 0 ? "text-red-600" : ""}`}>
           {formatMoney(subtotal, ctx.currency)}
         </td>
-        <td colSpan={COLUMNS.length - 2} />
       </tr>,
     );
     out.push(...buildRows(sub, rest, depth + 1, leafLevel, ctx, `${keyPrefix}${v}/`));
@@ -568,14 +627,16 @@ function LineRow({
 }) {
   return (
     <tr className="border-b border-slate-50 text-slate-700">
-      <td className="py-1.5 px-3 whitespace-nowrap" style={{ paddingLeft: `${indentRem(level)}rem` }}>
+      <td className="py-1.5 px-3 truncate" style={{ paddingLeft: `${indentRem(level)}rem` }}>
         {t.date}
       </td>
       <td className={`py-1.5 px-3 text-right whitespace-nowrap ${t.amount < 0 ? "text-red-600" : ""}`}>
         {formatMoney(t.amount, t.currency || currency)}
       </td>
-      <td className="py-1.5 px-3 whitespace-nowrap">{t.contactName ?? ""}</td>
-      <td className="py-1.5 px-3 whitespace-nowrap">
+      <td className="py-1.5 px-3 truncate" title={t.contactName ?? ""}>
+        {t.contactName ?? ""}
+      </td>
+      <td className="py-1.5 px-3 truncate">
         {t.documentId ? (
           <button
             className="lf-link"
@@ -588,7 +649,7 @@ function LineRow({
           (t.reference ?? "")
         )}
       </td>
-      <td className="py-1.5 px-3 whitespace-nowrap">
+      <td className="py-1.5 px-3 truncate">
         {t.documentId ? (
           <button
             className="lf-link"
@@ -606,7 +667,9 @@ function LineRow({
           </span>
         )}
       </td>
-      <td className="py-1.5 px-3 whitespace-nowrap">{t.description}</td>
+      <td className="py-1.5 px-3 truncate" title={t.description}>
+        {t.description}
+      </td>
     </tr>
   );
 }
