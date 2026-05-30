@@ -182,9 +182,40 @@ authRouter.get(
         platformRole: true,
         twoFactorEnabled: true,
         twoFactorRequired: true,
+        avatarUrl: true,
       },
     });
     res.json({ user });
+  }),
+);
+
+const AvatarSchema = z.object({
+  // A client-resized image as a data: URL. Capped (~220KB) so it stays small.
+  dataUrl: z
+    .string()
+    .regex(/^data:image\/(png|jpe?g|webp|gif);base64,/, "Ongeldige afbeelding")
+    .max(300_000, "Afbeelding te groot (max ~220KB na verkleinen)"),
+});
+
+/** Set the current user's profile picture. */
+authRouter.put(
+  "/me/avatar",
+  requireAuth,
+  validateBody(AvatarSchema),
+  asyncHandler(async (req, res) => {
+    const { dataUrl } = req.body as z.infer<typeof AvatarSchema>;
+    await prisma.user.update({ where: { id: req.user!.id }, data: { avatarUrl: dataUrl } });
+    res.json({ avatarUrl: dataUrl });
+  }),
+);
+
+/** Remove the current user's profile picture (fall back to initials). */
+authRouter.delete(
+  "/me/avatar",
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    await prisma.user.update({ where: { id: req.user!.id }, data: { avatarUrl: null } });
+    res.json({ ok: true });
   }),
 );
 

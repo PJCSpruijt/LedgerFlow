@@ -36,6 +36,8 @@ model User {
   twoFactorEnabled  Boolean @default(false)
   twoFactorRequired Boolean @default(false)
   twoFactorSecret   String?
+  // Optional profile picture, stored as a small data: URL (client-resized).
+  avatarUrl     String?
   createdAt     DateTime     @default(now())
   updatedAt     DateTime     @updatedAt
 

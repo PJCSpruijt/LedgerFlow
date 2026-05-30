@@ -9,6 +9,7 @@ export interface AuthUser {
   platformRole?: "USER" | "PLATFORM_ADMIN";
   twoFactorEnabled?: boolean;
   twoFactorRequired?: boolean;
+  avatarUrl?: string | null;
 }
 
 export type LoginResult =

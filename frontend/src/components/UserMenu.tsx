@@ -1,7 +1,34 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
-import { api } from "../services/api";
+import { api, ApiError } from "../services/api";
+
+/** Read an image file and re-encode it as a small square JPEG data URL. */
+function fileToAvatarDataUrl(file: File, size = 128): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      const canvas = document.createElement("canvas");
+      canvas.width = size;
+      canvas.height = size;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return reject(new Error("no canvas"));
+      // Cover-crop to a centered square.
+      const s = Math.min(img.width, img.height);
+      const sx = (img.width - s) / 2;
+      const sy = (img.height - s) / 2;
+      ctx.drawImage(img, sx, sy, s, s, 0, 0, size, size);
+      resolve(canvas.toDataURL("image/jpeg", 0.85));
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error("kon afbeelding niet laden"));
+    };
+    img.src = url;
+  });
+}
 
 interface Subscription {
   planName: string | null;
@@ -29,14 +56,46 @@ const STATUS_LABELS: Record<string, string> = {
  * user's name / e-mail / subscription, a link to Instellingen, and logout.
  */
 export function UserMenu() {
-  const { user, logout } = useAuth();
+  const { user, logout, refreshUser } = useAuth();
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   const [sub, setSub] = useState<Subscription | null>(null);
+  const [photoErr, setPhotoErr] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
 
   const name = [user?.firstName, user?.lastName].filter(Boolean).join(" ") || user?.email || "";
   const initials = initialsOf(user?.firstName, user?.lastName, user?.email);
+  const avatarUrl = user?.avatarUrl ?? null;
+
+  const onPickFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = ""; // allow re-selecting the same file
+    if (!file) return;
+    setPhotoErr(null);
+    setBusy(true);
+    try {
+      const dataUrl = await fileToAvatarDataUrl(file);
+      await api("/auth/me/avatar", { method: "PUT", body: { dataUrl } });
+      await refreshUser();
+    } catch (err) {
+      setPhotoErr(err instanceof ApiError ? err.message : "Uploaden mislukt");
+    } finally {
+      setBusy(false);
+    }
+  };
+  const removePhoto = async () => {
+    setBusy(true);
+    try {
+      await api("/auth/me/avatar", { method: "DELETE" });
+      await refreshUser();
+    } catch (err) {
+      setPhotoErr(err instanceof ApiError ? err.message : "Verwijderen mislukt");
+    } finally {
+      setBusy(false);
+    }
+  };
 
   // Load the subscription once, when the menu is first opened.
   useEffect(() => {
@@ -77,20 +136,51 @@ export function UserMenu() {
   return (
     <div className="relative" ref={ref}>
       <button
-        className="h-9 w-9 rounded-full bg-brand-600 text-white text-xs font-semibold flex items-center justify-center hover:bg-brand-700 focus:outline-none focus:ring-2 focus:ring-brand-300"
+        className="h-9 w-9 rounded-full overflow-hidden bg-brand-600 text-white text-xs font-semibold flex items-center justify-center hover:bg-brand-700 focus:outline-none focus:ring-2 focus:ring-brand-300"
         onClick={() => setOpen((o) => !o)}
         title={name}
         aria-haspopup="menu"
         aria-expanded={open}
       >
-        {initials}
+        {avatarUrl ? (
+          <img src={avatarUrl} alt={name} className="h-full w-full object-cover" />
+        ) : (
+          initials
+        )}
       </button>
+      <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={onPickFile} />
 
       {open && (
         <div className="absolute right-0 mt-2 w-64 bg-white rounded-lg shadow-xl border border-slate-200 z-50 overflow-hidden">
           <div className="px-4 py-3 border-b border-slate-100">
-            <div className="text-sm font-semibold text-slate-800 truncate">{name}</div>
-            <div className="text-xs text-slate-500 truncate">{user?.email}</div>
+            <div className="flex items-center gap-3">
+              <div className="h-12 w-12 shrink-0 rounded-full overflow-hidden bg-brand-600 text-white text-sm font-semibold flex items-center justify-center">
+                {avatarUrl ? (
+                  <img src={avatarUrl} alt={name} className="h-full w-full object-cover" />
+                ) : (
+                  initials
+                )}
+              </div>
+              <div className="min-w-0">
+                <div className="text-sm font-semibold text-slate-800 truncate">{name}</div>
+                <div className="text-xs text-slate-500 truncate">{user?.email}</div>
+                <div className="mt-1 flex items-center gap-2 text-xs">
+                  <button
+                    className="lf-link disabled:opacity-50"
+                    disabled={busy}
+                    onClick={() => fileRef.current?.click()}
+                  >
+                    {busy ? "Bezig…" : avatarUrl ? "Foto wijzigen" : "Foto uploaden"}
+                  </button>
+                  {avatarUrl && (
+                    <button className="text-slate-400 hover:text-red-500 disabled:opacity-50" disabled={busy} onClick={removePhoto}>
+                      Verwijderen
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+            {photoErr && <div className="mt-1 text-xs text-red-600">{photoErr}</div>}
             <div className="mt-2 text-xs">
               <span className="text-slate-400">Abonnement: </span>
               <span className="text-slate-700">
