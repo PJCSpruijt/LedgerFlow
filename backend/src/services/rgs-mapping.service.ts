@@ -240,22 +240,25 @@ export async function applyRgsMappings<T extends TransactionLine | TrialBalanceL
   const groupRows = groupCodes.length
     ? await prisma.rgsAccount.findMany({
         where: { version, code: { in: groupCodes } },
-        select: { code: true, description: true },
+        select: { code: true, description: true, referentienummer: true, dc: true },
       })
     : [];
-  const groupNameByCode = new Map(groupRows.map((r) => [r.code, r.description]));
+  const groupByCode = new Map(groupRows.map((r) => [r.code, r]));
 
   return lines.map((l) => {
     const m = byCode.get(l.glAccountCode);
     if (!m) return l;
     const gc = m.rgsCode ? groupCode(m.rgsCode) : null;
+    const g = gc ? groupByCode.get(gc) : undefined;
     return {
       ...l,
       rgsCode: m.rgsCode ?? null,
       rgsType: m.rgsCode ? (typeByCode.get(m.rgsCode) ?? null) : null,
       finCategory: m.finCategory?.key ?? null,
       rgsGroupCode: gc,
-      rgsGroupName: gc ? (groupNameByCode.get(gc) ?? null) : null,
+      rgsGroupName: g?.description ?? null,
+      rgsGroupOrder: g?.referentienummer ?? null,
+      rgsGroupDc: g?.dc ?? null,
     };
   });
 }

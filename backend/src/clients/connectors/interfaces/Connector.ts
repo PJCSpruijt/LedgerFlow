@@ -30,6 +30,10 @@ export interface TrialBalanceLine {
   rgsGroupCode?: string | null;
   /** RGS hoofdrubriek description, e.g. "Vorderingen", "Personeelskosten". */
   rgsGroupName?: string | null;
+  /** RGS hoofdrubriek referentienummer (fallback presentation order). */
+  rgsGroupOrder?: string | null;
+  /** RGS hoofdrubriek debit/credit nature ("D" = activa, "C" = passiva). */
+  rgsGroupDc?: string | null;
 }
 
 export interface TransactionLine {
@@ -76,6 +80,8 @@ export interface TransactionLine {
   finCategory?: string | null;
   rgsGroupCode?: string | null;
   rgsGroupName?: string | null;
+  rgsGroupOrder?: string | null;
+  rgsGroupDc?: string | null;
 
   /* ---- Reporting-currency conversion (set by the FX step in the route) ---- */
   /** `amount` converted to the requested reporting currency at the line's date. */
