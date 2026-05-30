@@ -7,6 +7,7 @@ import { RgsMappingPage } from "../pages/RgsMappingPage";
 import { RgsTaxonomyPage } from "../pages/RgsTaxonomyPage";
 import { RgsSettingsPage } from "../pages/RgsSettingsPage";
 import { UniversalChartPage } from "../pages/UniversalChartPage";
+import { FinCategoriesPage } from "../pages/FinCategoriesPage";
 import { TransactionsPage } from "../pages/TransactionsPage";
 import { GeneralLedgerPage } from "../pages/GeneralLedgerPage";
 import { RelationsView } from "../pages/RelationsPage";
@@ -90,6 +91,7 @@ export const MODULES: ModuleDef[] = [
     subpages: [
       { path: "account-tax", label: "Grootboek & btw", element: <VatMappingPage /> },
       { path: "rgs", label: "Rekeningkoppelingen (RGS)", element: <RgsMappingPage /> },
+      { path: "fin-categories", label: "FIN-categorieën", element: <FinCategoriesPage /> },
       { path: "universal-coa", label: "Universeel rekeningschema", element: <UniversalChartPage /> },
       { path: "relations", label: "Relatiekoppelingen", element: soon("Relatiekoppelingen") },
       { path: "cashflow", label: "Kasstroomkoppelingen", element: soon("Kasstroomkoppelingen") },

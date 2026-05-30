@@ -2,7 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 import { prisma } from "../config/prisma.js";
 import { asyncHandler } from "../middleware/asyncHandler.js";
-import { validateBody, validateQuery } from "../middleware/validate.js";
+import { validateBody, validateParams, validateQuery } from "../middleware/validate.js";
 import {
   requireAuth,
   requireScope,
@@ -43,6 +43,95 @@ rgsMappingRouter.get(
   requireScope,
   asyncHandler(async (req, res) => {
     res.json({ categories: await listFinCategories(req.scope!.workspaceId) });
+  }),
+);
+
+const FinCreateSchema = z.object({
+  key: z
+    .string()
+    .min(1)
+    .max(40)
+    .regex(/^[A-Za-z0-9_]+$/, "Alleen letters, cijfers en _ toegestaan"),
+  label: z.string().min(1).max(80),
+  kind: z.enum(["REVENUE", "COST", "METRIC"]).default("METRIC"),
+  description: z.string().max(200).optional(),
+  sortOrder: z.coerce.number().int().optional(),
+});
+
+/** Create a workspace-owned FIN semantic category. */
+rgsMappingRouter.post(
+  "/fin-categories",
+  requireScopeRole(...SCOPE_ADMIN_ROLES),
+  validateBody(FinCreateSchema),
+  asyncHandler(async (req, res) => {
+    const workspaceId = req.scope!.workspaceId;
+    const body = req.body as z.infer<typeof FinCreateSchema>;
+    const key = body.key.toUpperCase();
+    const clashDefault = await prisma.finSemanticCategory.findFirst({
+      where: { workspaceId: null, key },
+      select: { id: true },
+    });
+    if (clashDefault) throw new BadRequestError("Deze sleutel bestaat al als standaardcategorie");
+    const clashOwn = await prisma.finSemanticCategory.findFirst({
+      where: { workspaceId, key },
+      select: { id: true },
+    });
+    if (clashOwn) throw new BadRequestError("Deze sleutel bestaat al in deze werkruimte");
+    const category = await prisma.finSemanticCategory.create({
+      data: {
+        workspaceId,
+        key,
+        label: body.label,
+        kind: body.kind,
+        description: body.description ?? null,
+        sortOrder: body.sortOrder ?? 100,
+      },
+    });
+    res.status(201).json({ category });
+  }),
+);
+
+const FinIdParam = z.object({ id: z.string().uuid() });
+const FinUpdateSchema = z.object({
+  label: z.string().min(1).max(80).optional(),
+  kind: z.enum(["REVENUE", "COST", "METRIC"]).optional(),
+  description: z.string().max(200).nullable().optional(),
+  sortOrder: z.coerce.number().int().optional(),
+});
+
+/** Edit a workspace-owned FIN category (platform defaults are read-only). */
+rgsMappingRouter.patch(
+  "/fin-categories/:id",
+  requireScopeRole(...SCOPE_ADMIN_ROLES),
+  validateParams(FinIdParam),
+  validateBody(FinUpdateSchema),
+  asyncHandler(async (req, res) => {
+    const { id } = req.params as z.infer<typeof FinIdParam>;
+    const cat = await prisma.finSemanticCategory.findUnique({ where: { id } });
+    if (!cat || cat.workspaceId !== req.scope!.workspaceId) {
+      throw new BadRequestError("Alleen eigen categorieën kunnen worden bewerkt");
+    }
+    const category = await prisma.finSemanticCategory.update({
+      where: { id },
+      data: req.body as z.infer<typeof FinUpdateSchema>,
+    });
+    res.json({ category });
+  }),
+);
+
+/** Delete a workspace-owned FIN category (mappings keep working; link is cleared). */
+rgsMappingRouter.delete(
+  "/fin-categories/:id",
+  requireScopeRole(...SCOPE_ADMIN_ROLES),
+  validateParams(FinIdParam),
+  asyncHandler(async (req, res) => {
+    const { id } = req.params as z.infer<typeof FinIdParam>;
+    const cat = await prisma.finSemanticCategory.findUnique({ where: { id } });
+    if (!cat || cat.workspaceId !== req.scope!.workspaceId) {
+      throw new BadRequestError("Alleen eigen categorieën kunnen worden verwijderd");
+    }
+    await prisma.finSemanticCategory.delete({ where: { id } });
+    res.json({ ok: true });
   }),
 );
 
