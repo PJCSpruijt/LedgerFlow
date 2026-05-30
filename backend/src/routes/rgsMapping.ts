@@ -9,6 +9,7 @@ import {
   requireScopeRole,
   SCOPE_ADMIN_ROLES,
 } from "../middleware/auth.js";
+import { requireModule } from "../middleware/subscription.js";
 import { BadRequestError } from "../utils/errors.js";
 import { listSourceAccounts, syncSourceAccounts } from "../services/source-account.service.js";
 import {
@@ -21,6 +22,11 @@ import {
 } from "../services/rgs-mapping.service.js";
 
 export const rgsMappingRouter = Router();
+
+// RGS is a gated module. requireModule needs req.scope, so resolve scope first;
+// platform admins bypass the entitlement check inside requireModule. The
+// per-workspace on/off switch (rgsEnabled) gates the enrichment + UI separately.
+rgsMappingRouter.use(requireAuth, requireScope, requireModule("RGS"));
 
 /** RGS mapping is entity-scoped — an administration must be selected. */
 function requireEntity(req: import("express").Request): string {

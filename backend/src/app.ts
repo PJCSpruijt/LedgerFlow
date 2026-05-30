@@ -20,6 +20,7 @@ import { billingRouter, stripeWebhookRouter } from "./routes/billing.js";
 import { adminRouter } from "./routes/admin.js";
 import { vatMappingRouter } from "./routes/vatMapping.js";
 import { rgsMappingRouter } from "./routes/rgsMapping.js";
+import { workspaceSettingsRouter } from "./routes/workspaceSettings.js";
 
 /**
  * Build the Express app. Exposed as a factory so tests can mount it without
@@ -81,6 +82,7 @@ export function createApp() {
   app.use("/api/admin", adminRouter);
   app.use("/api/vat-mappings", vatMappingRouter);
   app.use("/api/rgs-mappings", rgsMappingRouter);
+  app.use("/api/workspace-settings", workspaceSettingsRouter);
 
   app.use(notFoundHandler);
   app.use(errorHandler);
