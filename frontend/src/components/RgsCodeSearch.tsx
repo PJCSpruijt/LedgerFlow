@@ -101,7 +101,7 @@ export function RgsCodeSearch({
         }}
       />
       {open && (loading || results.length > 0) && (
-        <div className="absolute z-50 mt-1 w-[26rem] max-h-72 overflow-auto bg-white border border-slate-200 rounded-md shadow-lg text-xs">
+        <div className="absolute z-50 mt-1 right-0 w-[44rem] max-w-[80vw] max-h-72 overflow-auto bg-white border border-slate-200 rounded-md shadow-lg text-xs">
           {loading && <div className="px-3 py-2 text-slate-400">Zoeken…</div>}
           {results.map((r, i) => (
             <button
