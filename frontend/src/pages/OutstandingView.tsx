@@ -4,6 +4,7 @@ import { useScope } from "../contexts/ScopeContext";
 import { api, ApiError } from "../services/api";
 import { formatMoney } from "../lib/period";
 import { usePdfModal } from "../components/PdfModal";
+import { ExportButtons } from "../components/ExportButtons";
 
 interface Item {
   relationId: string;
@@ -100,11 +101,35 @@ export function OutstandingView({ kind }: { kind: "debtor" | "creditor" }) {
     <div className="space-y-4">
       {pdfModal.element}
 
-      <div>
-        <h1 className="text-2xl font-semibold">{title}</h1>
-        <p className="text-sm text-slate-500 mt-1">
-          {entity ? entity.name : "Selecteer een administratie"} · ouderdom o.b.v. vervaldatum
-        </p>
+      <div className="flex items-start justify-between flex-wrap gap-2">
+        <div>
+          <h1 className="text-2xl font-semibold">{title}</h1>
+          <p className="text-sm text-slate-500 mt-1">
+            {entity ? entity.name : "Selecteer een administratie"} · ouderdom o.b.v. vervaldatum
+          </p>
+        </div>
+        {entity && data && (
+          <ExportButtons
+            filename={kind === "debtor" ? "debiteuren" : "crediteuren"}
+            sheetName={title}
+            getRows={() =>
+              (data.items ?? []).map((it) => {
+                const age = ageDays(it);
+                return {
+                  relatie: it.relationName,
+                  code: it.relationCode ?? "",
+                  factuurnummer: it.invoiceNumber ?? "",
+                  datum: it.date,
+                  vervaldatum: it.dueDate ?? "",
+                  totaal: it.totalAmount,
+                  openstaand: it.openAmount,
+                  ouderdom_dagen: age > 0 ? age : 0,
+                  bucket: BUCKETS.find((b) => b.key === bucketOf(age))?.label ?? "",
+                };
+              })
+            }
+          />
+        )}
       </div>
 
       {!entity && <div className="lf-card max-w-2xl">Selecteer een administratie in de bovenbalk.</div>}

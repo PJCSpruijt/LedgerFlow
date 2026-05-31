@@ -275,3 +275,25 @@ function addMetadataSheet(
   for (const [k, v] of data) ws.addRow({ k, v });
   ws.getColumn("v").alignment = { wrapText: true, vertical: "top" };
 }
+
+/**
+ * Generic single-sheet workbook from an array of flat objects. Columns are the
+ * keys of the first row. Used by the in-app "Export naar Excel" buttons, which
+ * post exactly the rows shown on screen (filters/sorting/grouping respected).
+ */
+export async function buildGenericWorkbook(
+  rows: Record<string, unknown>[],
+  sheetName = "Export",
+): Promise<Buffer> {
+  const wb = new ExcelJS.Workbook();
+  const ws = wb.addWorksheet(sheetName.slice(0, 31) || "Export");
+  const cols = rows[0] ? Object.keys(rows[0]) : [];
+  ws.columns = cols.map((c) => ({ header: c, key: c }));
+  for (const r of rows) ws.addRow(r);
+  if (cols.length) {
+    styleHeader(ws.getRow(1));
+    ws.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: cols.length } };
+  }
+  autosize(ws);
+  return (await wb.xlsx.writeBuffer()) as unknown as Buffer;
+}

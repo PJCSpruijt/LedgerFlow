@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { useScope } from "../contexts/ScopeContext";
 import { api, ApiError } from "../services/api";
+import { ExportButtons } from "../components/ExportButtons";
 
 interface Contact {
   id: string;
@@ -52,11 +53,27 @@ export function RelationsView({ mode }: { mode: Mode }) {
 
   return (
     <div className="space-y-4">
-      <div>
-        <h1 className="text-2xl font-semibold">{TITLES[mode]}</h1>
-        <p className="text-sm text-slate-500 mt-1">
-          {entity ? entity.name : "Selecteer een administratie"}
-        </p>
+      <div className="flex items-start justify-between flex-wrap gap-2">
+        <div>
+          <h1 className="text-2xl font-semibold">{TITLES[mode]}</h1>
+          <p className="text-sm text-slate-500 mt-1">
+            {entity ? entity.name : "Selecteer een administratie"}
+          </p>
+        </div>
+        {entity && !loading && !err && contacts.length > 0 && (
+          <ExportButtons
+            filename={`relaties-${mode}`}
+            sheetName={TITLES[mode]}
+            getRows={() =>
+              contacts.map((c) => ({
+                code: c.code ?? "",
+                naam: c.name,
+                debiteur: c.isDebtor ? "ja" : "",
+                crediteur: c.isCreditor ? "ja" : "",
+              }))
+            }
+          />
+        )}
       </div>
 
       {!entity && <div className="lf-card max-w-2xl">Selecteer een administratie in de bovenbalk.</div>}

@@ -207,7 +207,7 @@ export function AppShell() {
               const subs = visibleSubpages(activeModule);
               if (subs.length <= 1) return null;
               return (
-                <div className="bg-white border-b border-slate-200 px-6">
+                <div className="bg-white border-b border-slate-200 px-6 no-print">
                   <div className="flex gap-1 overflow-x-auto">
                     {subs.map((sp) => (
                       <NavLink

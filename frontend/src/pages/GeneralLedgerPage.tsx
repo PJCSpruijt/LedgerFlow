@@ -4,6 +4,7 @@ import { useNavigate } from "react-router-dom";
 import { useScope } from "../contexts/ScopeContext";
 import { api, ApiError } from "../services/api";
 import { formatMoney } from "../lib/period";
+import { ExportButtons } from "../components/ExportButtons";
 
 interface TbLine {
   glAccountCode: string;
@@ -147,6 +148,21 @@ export function GeneralLedgerPage() {
             >
               {groupByType ? "Groepering uit" : "Groeperen op type"}
             </button>
+            <ExportButtons
+              filename={`grootboek-${range.from}_${range.to}`}
+              sheetName="Grootboek"
+              getRows={() =>
+                rows.map((r) => ({
+                  code: r.glAccountCode,
+                  grootboekrekening: r.glAccountName,
+                  type: typeLabel(r.accountType),
+                  debet: r.debit,
+                  credit: r.credit,
+                  saldo: r.balance,
+                  valuta: r.currency,
+                }))
+              }
+            />
           </div>
         )}
       </div>

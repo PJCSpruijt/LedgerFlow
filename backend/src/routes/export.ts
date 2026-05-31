@@ -2,7 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 import { prisma } from "../config/prisma.js";
 import { asyncHandler } from "../middleware/asyncHandler.js";
-import { validateQuery } from "../middleware/validate.js";
+import { validateBody, validateQuery } from "../middleware/validate.js";
 import { requireAuth, requireScope, isPlatformAdmin } from "../middleware/auth.js";
 import { requireModule } from "../middleware/subscription.js";
 import { getWorkspaceEntitlements } from "../services/plan.service.js";
@@ -12,6 +12,7 @@ import {
   NO_CONNECTOR_MESSAGE,
 } from "../clients/connectors/registry.js";
 import {
+  buildGenericWorkbook,
   buildTransactionsWorkbook,
   buildTrialBalanceWorkbook,
   type ExportContext,
@@ -21,6 +22,28 @@ import {
 import { ForbiddenError, ModuleRequiredError, NotFoundError } from "../utils/errors.js";
 
 export const exportRouter = Router();
+
+const SheetSchema = z.object({
+  filename: z.string().max(120).optional(),
+  sheetName: z.string().max(40).optional(),
+  rows: z.array(z.record(z.unknown())).max(100_000),
+});
+
+/**
+ * Generic "Export naar Excel" — turns the rows shown on a page into an .xlsx.
+ * Ungated: it only re-serializes data the user can already see on screen.
+ */
+exportRouter.post(
+  "/sheet",
+  requireAuth,
+  requireScope,
+  validateBody(SheetSchema),
+  asyncHandler(async (req, res) => {
+    const { rows, sheetName, filename } = req.body as z.infer<typeof SheetSchema>;
+    const buf = await buildGenericWorkbook(rows, sheetName ?? "Export");
+    sendXlsx(res, buf, `${(filename ?? "export").replace(/[^\w.-]/g, "_")}.xlsx`);
+  }),
+);
 
 // `entityIds` is an optional comma-separated list. Absent (or empty) means the
 // whole workspace: every administration the caller is allowed to see.

@@ -18,3 +18,34 @@
   .lf-pill { @apply inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium; }
   .lf-link { @apply text-brand-600 hover:text-brand-700 hover:underline; }
 }
+
+/* Print / "Save as PDF": drop the app chrome and let tables flow across pages. */
+@media print {
+  aside,
+  header,
+  .no-print {
+    display: none !important;
+  }
+  main {
+    overflow: visible !important;
+  }
+  .overflow-auto,
+  .overflow-x-auto,
+  .overflow-y-auto {
+    overflow: visible !important;
+    max-height: none !important;
+  }
+  .sticky {
+    position: static !important;
+  }
+  .lf-card {
+    box-shadow: none !important;
+    --tw-ring-shadow: 0 0 #0000 !important;
+  }
+  body {
+    background: #fff !important;
+  }
+  @page {
+    margin: 12mm;
+  }
+}

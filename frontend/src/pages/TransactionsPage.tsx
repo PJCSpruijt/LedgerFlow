@@ -5,6 +5,7 @@ import { useScope } from "../contexts/ScopeContext";
 import { api, ApiError } from "../services/api";
 import { formatMoney } from "../lib/period";
 import { usePdfModal } from "../components/PdfModal";
+import { ExportButtons } from "../components/ExportButtons";
 
 interface Tx {
   date: string;
@@ -356,6 +357,29 @@ export function TransactionsPage() {
             <button className="lf-link" onClick={() => setExpanded(new Set())}>
               Alles inklappen
             </button>
+            <ExportButtons
+              filename={`transacties-${dateFrom}_${dateTo}`}
+              sheetName="Transacties"
+              getRows={() =>
+                shownGroups.flatMap((g) =>
+                  g.lines.map((t) => {
+                    const diff = t.reportingCurrency && t.currency && t.reportingCurrency !== t.currency;
+                    return {
+                      grootboekrekening: `${g.code} ${g.name}`,
+                      datum: t.date,
+                      relatie: t.contactName ?? "",
+                      referentie: t.reference ?? "",
+                      documenttype: t.documentType ?? "",
+                      omschrijving: t.description,
+                      origineel_bedrag: diff ? t.amount : "",
+                      origineel_valuta: diff ? t.currency : "",
+                      bedrag: t.reportingAmount ?? t.amount,
+                      valuta: t.reportingCurrency ?? currency,
+                    };
+                  }),
+                )
+              }
+            />
           </div>
         )}
       </div>

@@ -4,6 +4,7 @@ import { useNavigate } from "react-router-dom";
 import { useScope } from "../contexts/ScopeContext";
 import { api, ApiError } from "../services/api";
 import { formatMoney } from "../lib/period";
+import { ExportButtons } from "../components/ExportButtons";
 
 interface TbLine {
   glAccountCode: string;
@@ -215,10 +216,36 @@ export function FinancialStatementsPage() {
             {entity ? `${entity.name} · ${range.from} t/m ${range.to}` : "Selecteer een administratie"}
           </p>
         </div>
-        {hasRgs && (
-          <button className="lf-link text-xs" onClick={() => setGrouped((v) => !v)}>
-            {grouped ? "Toon losse rekeningen" : "Groepeer op RGS-categorie"}
-          </button>
+        {data && (
+          <div className="flex items-center gap-3">
+            {hasRgs && (
+              <button className="lf-link text-xs" onClick={() => setGrouped((v) => !v)}>
+                {grouped ? "Toon losse rekeningen" : "Groepeer op RGS-categorie"}
+              </button>
+            )}
+            <ExportButtons
+              filename={`jaarrekening-${range.from}_${range.to}`}
+              sheetName="Jaarrekening"
+              getRows={() => [
+                ...pnlCats.map((c) => ({
+                  overzicht: "Winst & verlies",
+                  zijde: c.side,
+                  rgs_code: c.code,
+                  categorie: c.name,
+                  bedrag: display(c.raw, "pnl", c.side),
+                  rekeningen: c.lines.length,
+                })),
+                ...balanceCats.map((c) => ({
+                  overzicht: "Balans",
+                  zijde: c.side,
+                  rgs_code: c.code,
+                  categorie: c.name,
+                  bedrag: display(c.raw, "balance", c.side),
+                  rekeningen: c.lines.length,
+                })),
+              ]}
+            />
+          </div>
         )}
       </div>
 
