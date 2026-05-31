@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useScope } from "../contexts/ScopeContext";
 import { api, ApiError } from "../services/api";
@@ -30,6 +31,8 @@ interface IcList {
 export function IntercompanyMatchingPage() {
   const { workspace, group, entity } = useScope();
   const qc = useQueryClient();
+  const [candidatesOnly, setCandidatesOnly] = useState(false);
+  const [q, setQ] = useState("");
 
   const { data, isLoading, isError, error } = useQuery({
     queryKey: ["intercompany", workspace?.id, group?.id, entity?.id],
@@ -79,10 +82,35 @@ export function IntercompanyMatchingPage() {
         </div>
       )}
 
-      {data?.blocks.map((b) => (
+      {data && (
+        <div className="flex items-center gap-4 flex-wrap">
+          <input
+            className="lf-input text-sm h-9 w-64"
+            placeholder="Zoek op relatie of code…"
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+          />
+          <label className="flex items-center gap-2 text-sm">
+            <input type="checkbox" checked={candidatesOnly} onChange={(e) => setCandidatesOnly(e.target.checked)} />
+            Alleen koppelbaar (gekoppeld of met suggestie)
+          </label>
+        </div>
+      )}
+
+      {data?.blocks.map((b) => {
+        const term = q.trim().toLowerCase();
+        const rels = b.relations.filter((r) => {
+          if (candidatesOnly && !r.counterpartyEntityId && !r.suggestedEntityId) return false;
+          if (term && !((r.relationName ?? "").toLowerCase().includes(term) || (r.relationCode ?? "").toLowerCase().includes(term)))
+            return false;
+          return true;
+        });
+        // Hide administrations with nothing matching while a filter is active.
+        if ((candidatesOnly || term) && rels.length === 0) return null;
+        return (
         <div key={b.entityId} className="lf-card">
           <h2 className="text-lg font-semibold mb-2">{b.entityName}</h2>
-          {b.relations.length === 0 ? (
+          {rels.length === 0 ? (
             <p className="text-sm text-slate-400">Geen relaties gevonden (of koppeling niet ingesteld).</p>
           ) : (
             <table className="w-full text-sm">
@@ -95,7 +123,7 @@ export function IntercompanyMatchingPage() {
                 </tr>
               </thead>
               <tbody>
-                {b.relations.map((r) => {
+                {rels.map((r) => {
                   const options = data.entities.filter((e) => e.id !== b.entityId);
                   const suggestion = r.suggestedEntityId && !r.counterpartyEntityId ? nameOf(r.suggestedEntityId) : null;
                   return (
@@ -154,7 +182,8 @@ export function IntercompanyMatchingPage() {
             </table>
           )}
         </div>
-      ))}
+        );
+      })}
     </div>
   );
 }

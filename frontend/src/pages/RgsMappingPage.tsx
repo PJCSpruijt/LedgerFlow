@@ -46,6 +46,8 @@ export function RgsMappingPage() {
   const qc = useQueryClient();
   const [err, setErr] = useState<string | null>(null);
   const [history, setHistory] = useState<{ code: string; rows: unknown[] } | null>(null);
+  const [unmappedOnly, setUnmappedOnly] = useState(false);
+  const [q, setQ] = useState("");
 
   const key = ["rgs-mappings", entity?.id];
   const { data, isLoading, isError, error } = useQuery({
@@ -103,6 +105,12 @@ export function RgsMappingPage() {
 
   const accounts = data?.accounts ?? [];
   const mapped = accounts.filter((a) => a.mapping?.rgsCode).length;
+  const term = q.trim().toLowerCase();
+  const filtered = accounts.filter((a) => {
+    if (unmappedOnly && a.mapping?.rgsCode) return false;
+    if (term && !(a.code.toLowerCase().includes(term) || a.name.toLowerCase().includes(term))) return false;
+    return true;
+  });
 
   return (
     <div className="space-y-4">
@@ -122,6 +130,24 @@ export function RgsMappingPage() {
           </button>
         )}
       </div>
+
+      {entity && accounts.length > 0 && (
+        <div className="flex items-center gap-4 flex-wrap">
+          <input
+            className="lf-input text-sm h-9 w-64"
+            placeholder="Zoek op code of naam…"
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+          />
+          <label className="flex items-center gap-2 text-sm">
+            <input type="checkbox" checked={unmappedOnly} onChange={(e) => setUnmappedOnly(e.target.checked)} />
+            Alleen niet-gekoppelde rekeningen
+          </label>
+          {(unmappedOnly || term) && (
+            <span className="text-xs text-slate-400">{filtered.length} van {accounts.length} getoond</span>
+          )}
+        </div>
+      )}
 
       {err && <div className="text-sm text-red-600">{err}</div>}
       {!entity && <div className="lf-card max-w-2xl">Selecteer een administratie in de bovenbalk.</div>}
@@ -153,7 +179,14 @@ export function RgsMappingPage() {
                 </tr>
               </thead>
               <tbody>
-                {accounts.map((row) => (
+                {filtered.length === 0 && (
+                  <tr>
+                    <td colSpan={5} className="py-4 px-3 text-slate-400">
+                      {unmappedOnly ? "Alle rekeningen (in deze selectie) zijn gekoppeld 🎉" : "Geen rekeningen gevonden."}
+                    </td>
+                  </tr>
+                )}
+                {filtered.map((row) => (
                   <tr key={row.code} className="border-b border-slate-100 align-top">
                     <td className="py-2 px-3 whitespace-nowrap">
                       <span className="font-mono text-slate-500 mr-2">{row.code}</span>
