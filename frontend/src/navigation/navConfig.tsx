@@ -17,6 +17,7 @@ import { FinancialStatementsPage } from "../pages/FinancialStatementsPage";
 import { ConsolidatedStatementsPage } from "../pages/ConsolidatedStatementsPage";
 import { ConsolidatedTrialBalancePage } from "../pages/ConsolidatedTrialBalancePage";
 import { IntercompanyMatchingPage } from "../pages/IntercompanyMatchingPage";
+import { ConsolidationRunsPage } from "../pages/ConsolidationRunsPage";
 import { BillingPage } from "../pages/BillingPage";
 import { SettingsPage } from "../pages/SettingsPage";
 import { AdminPage } from "../pages/AdminPage";
@@ -116,7 +117,7 @@ export const MODULES: ModuleDef[] = [
       { path: "statements", label: "Geconsolideerde jaarrekening", element: <ConsolidatedStatementsPage show="both" /> },
       { path: "pnl", label: "Geconsolideerde W&V", element: <ConsolidatedStatementsPage show="pnl" /> },
       { path: "balance-sheet", label: "Geconsolideerde balans", element: <ConsolidatedStatementsPage show="balance" /> },
-      { path: "runs", label: "Consolidatieruns", element: soon("Consolidatieruns") },
+      { path: "runs", label: "Consolidatieruns", element: <ConsolidationRunsPage /> },
       { path: "intercompany", label: "Intercompany-matching", element: <IntercompanyMatchingPage /> },
       { path: "elimination-rules", label: "Eliminatieregels", element: soon("Eliminatieregels") },
       { path: "elimination-entries", label: "Eliminatieboekingen", element: soon("Eliminatieboekingen") },

@@ -41,7 +41,7 @@ interface Imbalance {
   payable: number;
   diff: number;
 }
-interface ConsolResult {
+export interface ConsolResult {
   from: string;
   to: string;
   currency: string;
@@ -82,8 +82,15 @@ const toLine = (l: RawLeaf): Leaf => ({
  * in one reporting currency. Each leaf can be expanded to its per-entity build-up.
  * `show` selects W&V only, balans only, or both.
  */
-export function ConsolidatedStatementsPage({ show = "both" }: { show?: "both" | "pnl" | "balance" }) {
-  const { workspace, group, entity, dateFrom, dateTo, currency, view } = useScope();
+export function ConsolidatedStatementsPage({
+  show = "both",
+  snapshot,
+}: {
+  show?: "both" | "pnl" | "balance";
+  /** Render a saved consolidation snapshot read-only instead of fetching live. */
+  snapshot?: ConsolResult;
+}) {
+  const { workspace, group, entity, dateFrom, dateTo, currency: scopeCurrency, view } = useScope();
   const [open, setOpen] = useState<Set<string>>(new Set());
   const [openLeaf, setOpenLeaf] = useState<Set<string>>(new Set());
 
@@ -91,12 +98,18 @@ export function ConsolidatedStatementsPage({ show = "both" }: { show?: "both" | 
   // intercompany eliminations, or only the elimination entries.
   const eliminate = view === "after_eliminations" || view === "eliminations_only";
 
-  const { data, isLoading, isError, error } = useQuery({
-    queryKey: ["consolidation", workspace?.id, group?.id, entity?.id, dateFrom, dateTo, currency, eliminate],
+  const { data: fetched, isLoading: fetching, isError, error } = useQuery({
+    queryKey: ["consolidation", workspace?.id, group?.id, entity?.id, dateFrom, dateTo, scopeCurrency, eliminate],
     queryFn: () =>
-      api<ConsolResult>(`/api/consolidation/summary?from=${dateFrom}&to=${dateTo}&currency=${currency}${eliminate ? "&eliminate=1" : ""}`),
-    enabled: !!workspace,
+      api<ConsolResult>(`/api/consolidation/summary?from=${dateFrom}&to=${dateTo}&currency=${scopeCurrency}${eliminate ? "&eliminate=1" : ""}`),
+    enabled: !snapshot && !!workspace,
   });
+
+  const data = snapshot ?? fetched;
+  const isLoading = !snapshot && fetching;
+  const currency = snapshot?.currency ?? scopeCurrency;
+  const periodFrom = snapshot?.from ?? dateFrom;
+  const periodTo = snapshot?.to ?? dateTo;
 
   // Which leaves to show for the active view.
   const leaves = useMemo<Leaf[]>(() => {
@@ -152,6 +165,7 @@ export function ConsolidatedStatementsPage({ show = "both" }: { show?: "both" | 
   };
 
   const scopeLabel = data?.groupName ? `Groep: ${data.groupName}` : `Werkruimte: ${workspace?.name ?? "—"}`;
+  const showSelectHint = !snapshot && !workspace;
 
   const LeafRows = ({ cats, kind }: { cats: Cat<Leaf>[]; kind: "balance" | "pnl" }) =>
     cats.map((c) => {
@@ -239,12 +253,12 @@ export function ConsolidatedStatementsPage({ show = "both" }: { show?: "both" | 
         <div>
           <h1 className="text-2xl font-semibold">{title}</h1>
           <p className="text-sm text-slate-500 mt-1">
-            {scopeLabel} · {dateFrom} t/m {dateTo} · {currency}
+            {scopeLabel} · {periodFrom} t/m {periodTo} · {currency}
           </p>
         </div>
         {data && (
           <ExportButtons
-            filename={`geconsolideerd-${dateFrom}_${dateTo}`}
+            filename={`geconsolideerd-${periodFrom}_${periodTo}`}
             sheetName="Geconsolideerd"
             getRows={() => [
               ...pnlCats.map((c) => ({ overzicht: "Winst & verlies", zijde: c.side, rgs_code: c.code, categorie: c.name, bedrag: display(c.raw, "pnl", c.side), rekeningen: c.lines.length })),
@@ -270,8 +284,8 @@ export function ConsolidatedStatementsPage({ show = "both" }: { show?: "both" | 
         </div>
       )}
 
-      {!workspace && <div className="lf-card max-w-2xl">Selecteer een werkruimte in de bovenbalk.</div>}
-      {workspace && isLoading && <div className="lf-card">Consolidatie laden… (administraties worden parallel opgehaald)</div>}
+      {showSelectHint && <div className="lf-card max-w-2xl">Selecteer een werkruimte in de bovenbalk.</div>}
+      {isLoading && <div className="lf-card">Consolidatie laden… (administraties worden parallel opgehaald)</div>}
       {isError && (
         <div className="lf-card text-sm text-red-600">{error instanceof ApiError ? error.message : "Kon consolidatie niet laden"}</div>
       )}

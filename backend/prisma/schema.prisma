@@ -569,3 +569,25 @@ model IntercompanyRelation {
   @@index([workspaceId])
   @@index([counterpartyEntityId])
 }
+
+// A frozen, point-in-time consolidation result. Stores the full computed
+// snapshot (leaves, eliminations, imbalances, entities) so a consolidated
+// reporting position is reproducible even when the live connector data changes.
+model ConsolidationRun {
+  id              String   @id @default(uuid())
+  workspaceId     String
+  groupId         String?
+  label           String
+  scope           String // "group" | "workspace"
+  fromDate        String
+  toDate          String
+  currency        String
+  eliminate       Boolean  @default(false)
+  entityCount     Int      @default(0)
+  snapshot        Json
+  createdByUserId String?
+  createdAt       DateTime @default(now())
+
+  @@index([workspaceId, createdAt])
+  @@index([groupId])
+}
