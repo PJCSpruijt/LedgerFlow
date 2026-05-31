@@ -93,6 +93,7 @@ model Workspace {
   finCategories     FinSemanticCategory[]
   rgsMappings       SourceAccountMapping[]
   settings          WorkspaceSettings?
+  apiKeys           ApiKey[]
 }
 
 // A Group is a consolidation group inside a workspace (e.g. a holding).
@@ -333,6 +334,30 @@ model RefreshToken {
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
+}
+
+// API key for the external FIN//HUB Output API (#30). Read-only by default and
+// scoped to a workspace (optionally narrowed to one entity). Only a SHA-256 hash
+// of the key is stored; the raw value is shown once at creation.
+model ApiKey {
+  id              String    @id @default(uuid())
+  workspaceId     String
+  name            String
+  prefix          String // first chars of the key, for display (e.g. "fhk_ab12cd")
+  keyHash         String    @unique // sha256(full key)
+  scopes          String[]  @default(["read"])
+  entityId        String? // optional narrowing to one administration
+  rateLimitPerMin Int       @default(120)
+  createdByUserId String?
+  lastUsedAt      DateTime?
+  expiresAt       DateTime?
+  revokedAt       DateTime?
+  createdAt       DateTime  @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
+  @@index([keyHash])
 }
 
 // Append-only ledger of EVERY outbound connector request (#26). Used for vendor

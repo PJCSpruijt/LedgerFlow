@@ -8,6 +8,7 @@ import { RgsTaxonomyPage } from "../pages/RgsTaxonomyPage";
 import { RgsSettingsPage } from "../pages/RgsSettingsPage";
 import { UniversalChartPage } from "../pages/UniversalChartPage";
 import { FinCategoriesPage } from "../pages/FinCategoriesPage";
+import { ApiKeysPage } from "../pages/ApiKeysPage";
 import { TransactionsPage } from "../pages/TransactionsPage";
 import { GeneralLedgerPage } from "../pages/GeneralLedgerPage";
 import { RelationsView } from "../pages/RelationsPage";
@@ -135,7 +136,7 @@ export const MODULES: ModuleDef[] = [
       { path: "intercompany", label: "Intercompany-rapportages", element: soon("Intercompany-rapportages") },
       { path: "audit", label: "Auditrapportages", element: soon("Auditrapportages") },
       { path: "scheduled", label: "Geplande exports", element: soon("Geplande exports") },
-      { path: "api", label: "API-toegang", element: soon("API-toegang") },
+      { path: "api", label: "API-toegang", element: <ApiKeysPage /> },
     ],
   },
   {

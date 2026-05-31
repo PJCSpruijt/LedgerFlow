@@ -47,6 +47,9 @@ export interface ApiUsageInput {
   context: ConnectorContext | null;
   /** Defaults to "OUTBOUND" (connector calls). Inbound Output-API logging sets this. */
   direction?: "OUTBOUND" | "INBOUND";
+  /** Explicit scope override (e.g. inbound Output-API calls have no connector context). */
+  workspaceId?: string | null;
+  entityId?: string | null;
   startedAt: Date;
   endedAt: Date;
   operationType: string;
@@ -187,9 +190,9 @@ export function logApiUsage(input: ApiUsageInput): void {
         startedAt: input.startedAt,
         endedAt: input.endedAt,
         durationMs: Math.max(0, input.endedAt.getTime() - input.startedAt.getTime()),
-        workspaceId: ctx?.workspaceId ?? null,
+        workspaceId: input.workspaceId ?? ctx?.workspaceId ?? null,
         groupId: ctx?.groupId ?? null,
-        entityId: ctx?.entityId ?? null,
+        entityId: input.entityId ?? ctx?.entityId ?? null,
         connectorType: ctx?.connectorType ?? null,
         connectorAccountId: ctx?.connectionId ?? null,
         sourceAdministrationId: ctx?.sourceAdministrationId ?? null,

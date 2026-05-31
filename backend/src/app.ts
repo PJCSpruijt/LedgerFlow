@@ -21,6 +21,8 @@ import { adminRouter } from "./routes/admin.js";
 import { vatMappingRouter } from "./routes/vatMapping.js";
 import { rgsMappingRouter } from "./routes/rgsMapping.js";
 import { workspaceSettingsRouter } from "./routes/workspaceSettings.js";
+import { v1Router } from "./routes/v1.js";
+import { apiKeysRouter } from "./routes/apiKeys.js";
 
 /**
  * Build the Express app. Exposed as a factory so tests can mount it without
@@ -72,10 +74,14 @@ export function createApp() {
   // Routes
   app.use("/health", healthRouter);
   app.use("/auth", authRouter);
+  // External Output API (#30): API-key auth, independent of the internal 2FA/JWT
+  // pipeline. Mounted before the /api 2FA guard so external clients aren't blocked.
+  app.use("/api/v1", v1Router);
   // Hard-block all app APIs for users with admin-mandated-but-not-enrolled 2FA.
   // (Enrollment lives under /auth, which is mounted above and stays reachable.)
   app.use("/api", enforceTwoFactorEnrollment);
   app.use("/api/workspaces", workspaceRouter);
+  app.use("/api/api-keys", apiKeysRouter);
   app.use("/api/yuki", yukiRouter);
   app.use("/api/export", exportRouter);
   app.use("/api/billing", billingRouter);
