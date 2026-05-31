@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import ExcelJS from "exceljs";
 import { Router, type Response } from "express";
 import type { ApiKey } from "@prisma/client";
 import { prisma } from "../config/prisma.js";
@@ -77,6 +78,9 @@ const OPENAPI = {
     "/receivables": { get: { summary: "Open receivables + aging (entityId)" } },
     "/payables": { get: { summary: "Open payables + aging (entityId)" } },
     "/relations": { get: { summary: "Debtors + creditors (entityId)" } },
+    "/financial-statements": { get: { summary: "RGS-grouped balance + P&L (entityId, from, to)" } },
+    "/audit-trail": { get: { summary: "Workspace audit log (from, to, action)" } },
+    "/auditfile": { get: { summary: "XAF-subset auditfile XML (entityId, from, to)" } },
   },
 } as const;
 
@@ -164,13 +168,31 @@ function toCsv(rows: Record<string, unknown>[]): string {
   return [cols.join(","), ...rows.map((r) => cols.map((c) => csvEscape(r[c])).join(","))].join("\n");
 }
 
-/** Respond as JSON envelope, or as CSV when ?format=csv. */
-function respond(req: Request, res: Response, rows: Record<string, unknown>[], meta: Record<string, unknown> = {}): void {
-  if (String(req.query.format ?? "").toLowerCase() === "csv") {
+async function toXlsx(rows: Record<string, unknown>[], sheet = "Export"): Promise<Buffer> {
+  const wb = new ExcelJS.Workbook();
+  const ws = wb.addWorksheet(sheet);
+  const cols = rows[0] ? Object.keys(rows[0]) : [];
+  ws.columns = cols.map((c) => ({ header: c, key: c, width: 20 }));
+  for (const r of rows) ws.addRow(r);
+  ws.getRow(1).font = { bold: true };
+  if (cols.length) ws.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: cols.length } };
+  return (await wb.xlsx.writeBuffer()) as unknown as Buffer;
+}
+
+/** Respond as JSON envelope, or CSV/Excel when ?format=csv|xlsx. */
+async function respond(req: Request, res: Response, rows: Record<string, unknown>[], meta: Record<string, unknown> = {}): Promise<void> {
+  const fmt = String(req.query.format ?? "").toLowerCase();
+  res.setHeader("X-Request-Id", getRequestContext()?.correlationId ?? "");
+  res.setHeader("X-Generated-At", new Date().toISOString());
+  if (fmt === "csv") {
     res.setHeader("Content-Type", "text/csv; charset=utf-8");
-    res.setHeader("X-Request-Id", getRequestContext()?.correlationId ?? "");
-    res.setHeader("X-Generated-At", new Date().toISOString());
     res.send(toCsv(rows));
+    return;
+  }
+  if (fmt === "xlsx") {
+    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    res.setHeader("Content-Disposition", 'attachment; filename="finhub-export.xlsx"');
+    res.send(await toXlsx(rows));
     return;
   }
   sendV1(res, rows, meta);
@@ -265,7 +287,7 @@ v1Router.get(
       source_account_name: a.name,
       account_type: a.accountType,
     }));
-    respond(req, res, rows);
+    await respond(req, res, rows);
   }),
 );
 
@@ -282,7 +304,7 @@ v1Router.get(
       fin_category: m.finCategory?.key ?? null,
       mapping_confidence: m.confidence,
     }));
-    respond(req, res, rows);
+    await respond(req, res, rows);
   }),
 );
 
@@ -324,7 +346,7 @@ v1Router.get(
   asyncHandler(async (_req, res) => {
     const key = keyOf(res);
     const cats = await listFinCategories(key.workspaceId);
-    respond(_req, res, cats.map((c) => ({ key: c.key, label: c.label, kind: c.kind, workspace_scoped: c.workspaceId !== null })));
+    await respond(_req, res, cats.map((c) => ({ key: c.key, label: c.label, kind: c.kind, workspace_scoped: c.workspaceId !== null })));
   }),
 );
 
@@ -354,7 +376,7 @@ v1Router.get(
       currency: l.currency,
       generated_at: new Date().toISOString(),
     }));
-    respond(req, res, rows, { period: { from, to } });
+    await respond(req, res, rows, { period: { from, to } });
   }),
 );
 
@@ -371,7 +393,7 @@ const transactionsHandler = asyncHandler(async (req: Request, res: Response) => 
 
   const exported = lines.map((l) => txExportLine(l, ent, currency));
   const { page, meta } = paginate(req, exported);
-  respond(req, res, page, { ...meta, period: { from, to }, currency });
+  await respond(req, res, page, { ...meta, period: { from, to }, currency });
 });
 
 v1Router.get("/transactions", transactionsHandler);
@@ -404,7 +426,7 @@ async function outstanding(req: Request, res: Response, kind: "debtor" | "credit
       generated_at: new Date().toISOString(),
     };
   });
-  respond(req, res, rows);
+  await respond(req, res, rows);
 }
 
 v1Router.get("/receivables", asyncHandler((req, res) => outstanding(req, res, "debtor")));
@@ -431,9 +453,144 @@ v1Router.get(
       is_debtor: r.isDebtor,
       is_creditor: r.isCreditor,
     }));
-    respond(req, res, rows);
+    await respond(req, res, rows);
   }),
 );
 
 // Relation mappings: reserved for a later phase (relation normalization).
 v1Router.get("/relation-mappings", (_req, res) => sendV1(res, [], { note: "Relation mapping arrives in a later phase." }));
+
+// ---- Financial statements (RGS-grouped) -----------------------------------
+
+const PASSIVA_GROUPS = new Set(["BEiv", "BVev", "BAdk", "BVrz", "BLas", "BSch"]);
+
+v1Router.get(
+  "/financial-statements",
+  asyncHandler(async (req, res) => {
+    const ent = await resolveEntity(req, res);
+    const { from, to } = dateRange(req);
+    const connector = await getConnectorForEntity(ent.id);
+    const tb = await applyRgsMappings(await connector.getTrialBalance({ from, to }), ent.workspaceId, ent.id);
+    const currency = tb[0]?.currency ?? "EUR";
+
+    const groups = new Map<string, { code: string; name: string; dc: string | null; statement: string; balance: number; accounts: number }>();
+    for (const l of tb) {
+      const code = l.rgsGroupCode || "ZZZ";
+      const g = groups.get(code) ?? {
+        code,
+        name: l.rgsGroupName || "Niet aan RGS gekoppeld",
+        dc: l.rgsGroupDc ?? null,
+        statement: l.accountType === "PROFIT_LOSS" ? "PNL" : "BALANCE",
+        balance: 0,
+        accounts: 0,
+      };
+      g.balance += l.balance;
+      g.accounts += 1;
+      groups.set(code, g);
+    }
+    const rows = [...groups.values()].map((g) => {
+      const side = g.statement === "PNL" ? "PNL" : PASSIVA_GROUPS.has(g.code) || g.dc === "C" ? "PASSIVA" : "ACTIVA";
+      const amount = g.statement === "PNL" || side === "PASSIVA" ? -g.balance : g.balance;
+      return {
+        workspace_id: ent.workspaceId,
+        entity_id: ent.id,
+        entity_name: ent.name,
+        statement: g.statement,
+        side,
+        rgs_group_code: g.code,
+        rgs_group_name: g.name,
+        amount,
+        currency,
+        accounts: g.accounts,
+        generated_at: new Date().toISOString(),
+      };
+    });
+    rows.sort((a, b) => a.statement.localeCompare(b.statement) || a.side.localeCompare(b.side) || a.rgs_group_code.localeCompare(b.rgs_group_code));
+    await respond(req, res, rows, { period: { from, to }, currency });
+  }),
+);
+
+// ---- Audit trail -----------------------------------------------------------
+
+v1Router.get(
+  "/audit-trail",
+  asyncHandler(async (req, res) => {
+    const key = keyOf(res);
+    const { from, to } = dateRange(req);
+    const logs = await prisma.auditLog.findMany({
+      where: {
+        workspaceId: key.workspaceId,
+        timestamp: { gte: new Date(`${from}T00:00:00.000Z`), lte: new Date(`${to}T23:59:59.999Z`) },
+        ...(typeof req.query.action === "string" && req.query.action ? { action: req.query.action } : {}),
+      },
+      orderBy: { timestamp: "desc" },
+      take: Math.min(Number(req.query.limit) || 1000, 10_000),
+      select: { timestamp: true, action: true, userId: true, entityId: true, metadata: true },
+    });
+    const rows = logs.map((l) => ({
+      timestamp: l.timestamp.toISOString(),
+      action: l.action,
+      user_id: l.userId,
+      entity_id: l.entityId,
+      metadata: l.metadata ? JSON.stringify(l.metadata) : null,
+    }));
+    await respond(req, res, rows);
+  }),
+);
+
+// ---- Auditfile (XAF subset, best-effort) ----------------------------------
+
+const xmlEsc = (s: unknown): string =>
+  String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+v1Router.get(
+  "/auditfile",
+  asyncHandler(async (req, res) => {
+    const ent = await resolveEntity(req, res);
+    const { from, to } = dateRange(req);
+    const connector = await getConnectorForEntity(ent.id);
+    const [tb, txns] = await Promise.all([
+      connector.getTrialBalance({ from, to }),
+      connector.getTransactions({ from, to }),
+    ]);
+    const accounts = tb
+      .map(
+        (a) =>
+          `      <ledgerAccount><accID>${xmlEsc(a.glAccountCode)}</accID><accDesc>${xmlEsc(a.glAccountName)}</accDesc><accTp>${a.accountType === "PROFIT_LOSS" ? "P" : "B"}</accTp></ledgerAccount>`,
+      )
+      .join("\n");
+    const trLines = txns
+      .map(
+        (t, i) =>
+          `        <trLine><nr>${i + 1}</nr><accID>${xmlEsc(t.glAccountCode)}</accID><desc>${xmlEsc(t.description)}</desc><docRef>${xmlEsc(t.reference ?? "")}</docRef><effDate>${xmlEsc(t.date)}</effDate><amnt>${Math.abs(t.amount).toFixed(2)}</amnt><amntTp>${t.amount >= 0 ? "D" : "C"}</amntTp></trLine>`,
+      )
+      .join("\n");
+    const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<!-- FIN//HUB auditfile (XAF-subset, best-effort). Not a certified XAF 3.2 export. -->
+<auditfile>
+  <header>
+    <fiscalYear>${xmlEsc(from.slice(0, 4))}</fiscalYear>
+    <startDate>${xmlEsc(from)}</startDate>
+    <endDate>${xmlEsc(to)}</endDate>
+    <curCode>EUR</curCode>
+    <dateCreated>${new Date().toISOString().slice(0, 10)}</dateCreated>
+    <softwareDesc>FIN//HUB</softwareDesc>
+  </header>
+  <company>
+    <companyName>${xmlEsc(ent.name)}</companyName>
+    <generalLedger>
+${accounts}
+    </generalLedger>
+    <transactions>
+      <journal>
+${trLines}
+      </journal>
+    </transactions>
+  </company>
+</auditfile>`;
+    res.setHeader("Content-Type", "application/xml; charset=utf-8");
+    res.setHeader("Content-Disposition", `attachment; filename="finhub-auditfile-${ent.id}.xml"`);
+    res.setHeader("X-Request-Id", getRequestContext()?.correlationId ?? "");
+    res.send(xml);
+  }),
+);
