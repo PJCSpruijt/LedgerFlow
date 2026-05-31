@@ -219,16 +219,18 @@ export function AppShell() {
             (() => {
               const subs = visibleSubpages(activeModule);
               if (subs.length <= 1) return null;
+              // The bare module path renders the first subpage, so highlight it there too.
+              const atBase = pathname === activeModule.basePath;
               return (
                 <div className="bg-white border-b border-slate-200 px-6 no-print">
                   <div className="flex gap-1 overflow-x-auto">
-                    {subs.map((sp) => (
+                    {subs.map((sp, i) => (
                       <NavLink
                         key={sp.path}
                         to={`${activeModule.basePath}/${sp.path}`}
                         className={({ isActive }) =>
                           `px-3 py-3 text-sm whitespace-nowrap border-b-2 -mb-px ${
-                            isActive
+                            isActive || (atBase && i === 0)
                               ? "border-brand-600 text-brand-700 font-medium"
                               : "border-transparent text-slate-500 hover:text-slate-800"
                           }`

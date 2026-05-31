@@ -62,27 +62,20 @@ export function App() {
       >
         <Route path="/" element={<Navigate to="/dashboard/overview" replace />} />
 
-        {/* Module + subpage routes, generated from navConfig. */}
-        {MODULES.flatMap((mod) => [
-          <Route
-            key={`${mod.key}-index`}
-            path={mod.basePath}
-            element={<Navigate to={`${mod.basePath}/${mod.subpages[0]!.path}`} replace />}
-          />,
-          ...mod.subpages.map((sp) => (
-            <Route
-              key={`${mod.key}-${sp.path}`}
-              path={`${mod.basePath}/${sp.path}`}
-              element={
-                mod.platformAdminOnly ? (
-                  <RequirePlatformAdmin>{sp.element}</RequirePlatformAdmin>
-                ) : (
-                  sp.element
-                )
-              }
-            />
-          )),
-        ])}
+        {/* Module + subpage routes, generated from navConfig. The module base
+            path renders its first subpage directly (not a client redirect), so
+            landing on a bare module path can never race with the URL-sync and
+            blank the page. */}
+        {MODULES.flatMap((mod) => {
+          const wrap = (el: ReactElement) =>
+            mod.platformAdminOnly ? <RequirePlatformAdmin>{el}</RequirePlatformAdmin> : el;
+          return [
+            <Route key={`${mod.key}-index`} path={mod.basePath} element={wrap(mod.subpages[0]!.element)} />,
+            ...mod.subpages.map((sp) => (
+              <Route key={`${mod.key}-${sp.path}`} path={`${mod.basePath}/${sp.path}`} element={wrap(sp.element)} />
+            )),
+          ];
+        })}
 
         {/* Stripe return URLs (configured in env) must keep resolving to Billing. */}
         <Route path="/billing/success" element={<BillingPage />} />
