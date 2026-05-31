@@ -21,6 +21,7 @@ import { adminRouter } from "./routes/admin.js";
 import { vatMappingRouter } from "./routes/vatMapping.js";
 import { rgsMappingRouter } from "./routes/rgsMapping.js";
 import { consolidationRouter } from "./routes/consolidation.js";
+import { dashboardRouter } from "./routes/dashboard.js";
 import { workspaceSettingsRouter } from "./routes/workspaceSettings.js";
 import { v1Router } from "./routes/v1.js";
 import { apiKeysRouter } from "./routes/apiKeys.js";
@@ -90,6 +91,7 @@ export function createApp() {
   app.use("/api/vat-mappings", vatMappingRouter);
   app.use("/api/rgs-mappings", rgsMappingRouter);
   app.use("/api/consolidation", consolidationRouter);
+  app.use("/api/dashboard", dashboardRouter);
   app.use("/api/workspace-settings", workspaceSettingsRouter);
 
   app.use(notFoundHandler);

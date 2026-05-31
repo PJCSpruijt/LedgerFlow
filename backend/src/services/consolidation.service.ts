@@ -266,7 +266,7 @@ interface AccountMeta {
 /** RGS codes that are intercompany by definition (vorderingen/schulden op
  *  groepsmaatschappijen, rekening-courant groepsmij). For these the whole
  *  closing balance is intercompany, so the full leaf balance is eliminated. */
-const isIntragroupCode = (rgs: string | null): boolean =>
+export const isIntragroupCode = (rgs: string | null): boolean =>
   !!rgs && (rgs.startsWith("BVorVog") || rgs.startsWith("BSchSag") || rgs.startsWith("BSchScg"));
 
 /**
