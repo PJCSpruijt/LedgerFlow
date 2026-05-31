@@ -10,6 +10,8 @@ export interface AuthUser {
   twoFactorEnabled?: boolean;
   twoFactorRequired?: boolean;
   avatarUrl?: string | null;
+  /** Disabled dashboard widget keys (see lib/dashboardWidgets). */
+  dashboardWidgets?: string[] | null;
 }
 
 export type LoginResult =

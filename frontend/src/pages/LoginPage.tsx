@@ -24,7 +24,7 @@ export function LoginPage() {
       if (r.twoFactorRequired) {
         setChallengeToken(r.challengeToken);
       } else {
-        nav("/dashboard");
+        nav("/dashboard/overview");
       }
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Inloggen mislukt");
@@ -39,7 +39,7 @@ export function LoginPage() {
     setSubmitting(true);
     try {
       await verifyTwoFactor(challengeToken!, code);
-      nav("/dashboard");
+      nav("/dashboard/overview");
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Verificatie mislukt");
     } finally {

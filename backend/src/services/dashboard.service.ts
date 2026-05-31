@@ -1,6 +1,7 @@
 import { prisma } from "../config/prisma.js";
 import { tryGetConnectorForEntity } from "../clients/connectors/registry.js";
 import { applyRgsMappings } from "./rgs-mapping.service.js";
+import { applyVatMappings, requiredVatCodes } from "./vat-mapping.service.js";
 import { getIntercompanyRelations, getIntercompanyMap, normName } from "./intercompany.service.js";
 import { isIntragroupCode } from "./consolidation.service.js";
 import { convert, prefetchRates } from "./fx.service.js";
@@ -14,10 +15,11 @@ import { convert, prefetchRates } from "./fx.service.js";
  */
 
 export interface MonthRevenue {
-  month: string; // YYYY-MM
-  gross: number;
-  intercompany: number;
-  net: number;
+  month: number; // 1-12
+  current: number; // net revenue, current year
+  currentGross: number;
+  currentIc: number;
+  previous: number; // net revenue, previous year (comparison line)
 }
 
 export interface DashboardKpis {
@@ -25,8 +27,15 @@ export interface DashboardKpis {
   to: string;
   currency: string;
   entities: { id: string; name: string; included: boolean; reason?: string }[];
+  /** Always 12 months (Jan–Dec) of the reporting year + a previous-year line. */
   revenueByMonth: MonthRevenue[];
+  revenueYear: number;
+  revenuePrevYear: number;
   revenueTotal: { gross: number; intercompany: number; net: number };
+  revenuePrevTotal: number;
+  /** Data-quality warnings (counts) for the dashboard widgets. */
+  unmappedRgsAccounts: number;
+  unmappedVatCodes: number;
   cash: number;
   workingCapital: {
     net: number;
@@ -60,6 +69,13 @@ export async function computeDashboardKpis(input: DashboardInput): Promise<Dashb
   const groupId = input.groupId ?? null;
   const warnings: string[] = [];
 
+  // Revenue chart spans the reporting year (12 months) + the previous year, so
+  // transactions are fetched over a widened range (union with the selected period).
+  const year = Number(to.slice(0, 4));
+  const prevYear = year - 1;
+  const txFrom = `${prevYear}-01-01` < from ? `${prevYear}-01-01` : from;
+  const txTo = `${year}-12-31` > to ? `${year}-12-31` : to;
+
   const entities = await prisma.entity.findMany({
     where: groupId ? { groupId, group: { workspaceId } } : { group: { workspaceId } },
     select: { id: true, name: true },
@@ -71,7 +87,8 @@ export async function computeDashboardKpis(input: DashboardInput): Promise<Dashb
   const intercompanyConfigured = [...icRels.values()].some((a) => a.length > 0);
 
   // Accumulators (reporting currency, signed = debit − credit for balances).
-  const revMonth = new Map<string, { gross: number; ic: number }>();
+  // Revenue keyed by `${year}-${mm}` so current + previous year are separable.
+  const revYM = new Map<string, { gross: number; ic: number }>();
   let recvGross = 0;
   let payGross = 0;
   let recvElim = 0;
@@ -82,6 +99,11 @@ export async function computeDashboardKpis(input: DashboardInput): Promise<Dashb
   let creGross = 0;
   let creIC = 0;
   let unmappedBalance = false;
+  let unmappedRgsAccounts = 0;
+  let unmappedVatCodes = 0;
+  const rgsEnabledSettings = await prisma.workspaceSettings.findUnique({ where: { workspaceId }, select: { rgsEnabled: true } });
+  const rgsEnabled = rgsEnabledSettings?.rgsEnabled ?? false;
+  const inPeriod = (d: string) => d >= from && d <= to;
 
   const status: DashboardKpis["entities"] = [];
 
@@ -96,7 +118,7 @@ export async function computeDashboardKpis(input: DashboardInput): Promise<Dashb
       try {
         [tb, txns, deb, cre] = await Promise.all([
           connector.getTrialBalance({ from, to }).then((r) => applyRgsMappings(r, workspaceId, ent.id)),
-          connector.getTransactions({ from, to }).then((r) => applyRgsMappings(r, workspaceId, ent.id)),
+          connector.getTransactions({ from: txFrom, to: txTo }).then((r) => applyRgsMappings(r, workspaceId, ent.id)),
           connector.getOutstanding("debtor"),
           connector.getOutstanding("creditor"),
         ]);
@@ -132,24 +154,38 @@ export async function computeDashboardKpis(input: DashboardInput): Promise<Dashb
         else if (group.startsWith("BSch")) payGross += bal;
         else if (group.startsWith("BLim")) cash += bal;
         else if (!l.rgsGroupCode && l.accountType !== "PROFIT_LOSS") unmappedBalance = true;
+        // "Nog toe te kennen RGS": discovered accounts without an RGS code.
+        if (rgsEnabled && !l.rgsCode) unmappedRgsAccounts += 1;
       }
 
       // Per-account intercompany flow (transactions tagged with a counterparty).
+      // IC-flow + revenue use the widened range; working-capital flow uses the period.
       const icFlow = new Map<string, number>();
       for (const t of txns) {
         const conv = await convert(t.amount, (t.currency || currency).toUpperCase(), currency, t.date);
         const amt = conv ?? t.amount;
         const cp = t.contactName ? nameToCp.get(normName(t.contactName)) : undefined;
+        const ty = Number(t.date.slice(0, 4));
 
-        // Revenue development per month (gross + intercompany).
-        if (isRevenue(t.rgsGroupCode, t.accountType, t.glAccountName)) {
-          const m = t.date.slice(0, 7);
-          const r = revMonth.get(m) ?? { gross: 0, ic: 0 };
+        // Revenue per month, split into current year + previous year.
+        if ((ty === year || ty === prevYear) && isRevenue(t.rgsGroupCode, t.accountType, t.glAccountName)) {
+          const key = `${ty}-${t.date.slice(5, 7)}`;
+          const r = revYM.get(key) ?? { gross: 0, ic: 0 };
           r.gross += -amt; // credit → positive revenue
           if (cp) r.ic += -amt;
-          revMonth.set(m, r);
+          revYM.set(key, r);
         }
-        if (cp) icFlow.set(t.glAccountCode, (icFlow.get(t.glAccountCode) ?? 0) + amt);
+        // Working-capital intercompany elimination only on the selected period.
+        if (cp && inPeriod(t.date)) icFlow.set(t.glAccountCode, (icFlow.get(t.glAccountCode) ?? 0) + amt);
+      }
+
+      // "Nog toe te kennen BTW": VAT codes still requiring a mapping in the period.
+      try {
+        const periodTxns = txns.filter((t) => inPeriod(t.date));
+        const vat = await applyVatMappings(periodTxns, workspaceId, ent.id);
+        unmappedVatCodes += requiredVatCodes(vat).length;
+      } catch {
+        /* VAT scan is best-effort */
       }
 
       // Eliminate intercompany on current receivables/payables: dedicated
@@ -184,13 +220,21 @@ export async function computeDashboardKpis(input: DashboardInput): Promise<Dashb
     warnings.push("Niet alle administraties konden worden geladen.");
   }
 
-  const revenueByMonth: MonthRevenue[] = [...revMonth.entries()]
-    .map(([month, v]) => ({ month, gross: v.gross, intercompany: v.ic, net: v.gross - v.ic }))
-    .sort((a, b) => a.month.localeCompare(b.month));
-  const revenueTotal = revenueByMonth.reduce(
-    (s, m) => ({ gross: s.gross + m.gross, intercompany: s.intercompany + m.intercompany, net: s.net + m.net }),
-    { gross: 0, intercompany: 0, net: 0 },
-  );
+  // Always 12 months (Jan–Dec) for the reporting year, with a previous-year line.
+  const revenueByMonth: MonthRevenue[] = [];
+  let curGross = 0;
+  let curIc = 0;
+  let prevNet = 0;
+  for (let m = 1; m <= 12; m++) {
+    const mm = String(m).padStart(2, "0");
+    const c = revYM.get(`${year}-${mm}`) ?? { gross: 0, ic: 0 };
+    const p = revYM.get(`${prevYear}-${mm}`) ?? { gross: 0, ic: 0 };
+    revenueByMonth.push({ month: m, current: c.gross - c.ic, currentGross: c.gross, currentIc: c.ic, previous: p.gross - p.ic });
+    curGross += c.gross;
+    curIc += c.ic;
+    prevNet += p.gross - p.ic;
+  }
+  const revenueTotal = { gross: curGross, intercompany: curIc, net: curGross - curIc };
 
   const recvNet = recvGross + recvElim; // signed (positive = receivable)
   const payNet = payGross + payElim; // signed (negative = payable)
@@ -201,7 +245,12 @@ export async function computeDashboardKpis(input: DashboardInput): Promise<Dashb
     currency,
     entities: status.sort((a, b) => a.name.localeCompare(b.name)),
     revenueByMonth,
+    revenueYear: year,
+    revenuePrevYear: prevYear,
     revenueTotal,
+    revenuePrevTotal: prevNet,
+    unmappedRgsAccounts,
+    unmappedVatCodes,
     cash,
     workingCapital: {
       net: recvNet + payNet,

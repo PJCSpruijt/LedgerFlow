@@ -38,6 +38,9 @@ model User {
   twoFactorSecret   String?
   // Optional profile picture, stored as a small data: URL (client-resized).
   avatarUrl     String?
+  // Per-user dashboard widget preferences: list of DISABLED widget keys
+  // (so newly added widgets are visible by default). e.g. ["unmappedVat"].
+  dashboardWidgets Json?
   createdAt     DateTime     @default(now())
   updatedAt     DateTime     @updatedAt
 

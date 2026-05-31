@@ -183,9 +183,23 @@ authRouter.get(
         twoFactorEnabled: true,
         twoFactorRequired: true,
         avatarUrl: true,
+        dashboardWidgets: true,
       },
     });
     res.json({ user });
+  }),
+);
+
+/** Save the current user's dashboard widget preferences (list of disabled keys). */
+const DashboardWidgetsSchema = z.object({ disabled: z.array(z.string().max(60)).max(50) });
+authRouter.put(
+  "/me/dashboard",
+  requireAuth,
+  validateBody(DashboardWidgetsSchema),
+  asyncHandler(async (req, res) => {
+    const { disabled } = req.body as z.infer<typeof DashboardWidgetsSchema>;
+    await prisma.user.update({ where: { id: req.user!.id }, data: { dashboardWidgets: disabled } });
+    res.json({ dashboardWidgets: disabled });
   }),
 );
 

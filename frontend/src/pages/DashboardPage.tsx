@@ -1,8 +1,10 @@
 import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { useScope } from "../contexts/ScopeContext";
+import { useAuth } from "../contexts/AuthContext";
 import { api } from "../services/api";
 import { formatMoney } from "../lib/period";
+import { isWidgetEnabled } from "../lib/dashboardWidgets";
 
 interface Subscription {
   plan: string | null;
@@ -12,10 +14,11 @@ interface Subscription {
 }
 
 interface MonthRevenue {
-  month: string;
-  gross: number;
-  intercompany: number;
-  net: number;
+  month: number; // 1-12
+  current: number;
+  currentGross: number;
+  currentIc: number;
+  previous: number;
 }
 interface Kpis {
   from: string;
@@ -23,7 +26,12 @@ interface Kpis {
   currency: string;
   entities: { id: string; name: string; included: boolean; reason?: string }[];
   revenueByMonth: MonthRevenue[];
+  revenueYear: number;
+  revenuePrevYear: number;
   revenueTotal: { gross: number; intercompany: number; net: number };
+  revenuePrevTotal: number;
+  unmappedRgsAccounts: number;
+  unmappedVatCodes: number;
   cash: number;
   workingCapital: {
     net: number;
@@ -41,7 +49,6 @@ interface Kpis {
 }
 
 const MONTHS = ["jan", "feb", "mrt", "apr", "mei", "jun", "jul", "aug", "sep", "okt", "nov", "dec"];
-const monthLabel = (m: string) => MONTHS[Number(m.slice(5, 7)) - 1] ?? m;
 
 /** A single KPI tile: big net value + optional gross/intercompany subtext. */
 function KpiTile({
@@ -82,28 +89,59 @@ function KpiTile({
   );
 }
 
-/** Stacked monthly revenue bars: net (solid) + intercompany (light) up to gross. */
-function RevenueChart({ data, currency }: { data: MonthRevenue[]; currency: string }) {
-  const max = Math.max(1, ...data.map((d) => Math.abs(d.gross)));
+/** A data-quality warning tile: count of items still needing attention. */
+function WarningTile({ label, count, unit, to }: { label: string; count: number; unit: string; to: string }) {
+  const ok = count === 0;
   return (
-    <div className="flex items-end gap-1 h-40">
-      {data.map((d) => {
-        const netH = (Math.max(0, d.net) / max) * 100;
-        const icH = (Math.max(0, d.intercompany) / max) * 100;
-        return (
-          <div key={d.month} className="flex-1 flex flex-col items-center justify-end h-full group relative">
-            <div className="w-full flex flex-col justify-end h-full">
-              <div className="w-full bg-rose-200" style={{ height: `${icH}%` }} title="Intercompany (geëlimineerd)" />
-              <div className="w-full bg-brand-500" style={{ height: `${netH}%` }} title="Netto omzet" />
-            </div>
-            <div className="text-[10px] text-slate-400 mt-1">{monthLabel(d.month)}</div>
-            <div className="absolute bottom-full mb-1 hidden group-hover:block bg-slate-800 text-white text-[10px] rounded px-2 py-1 whitespace-nowrap z-10">
-              {monthLabel(d.month)}: netto {formatMoney(d.net, currency)}
-              {d.intercompany > 0.005 && <> · IC {formatMoney(d.intercompany, currency)}</>}
-            </div>
-          </div>
-        );
-      })}
+    <Link to={to} className={`lf-card block hover:ring-2 ${ok ? "hover:ring-emerald-200" : "ring-1 ring-amber-200 bg-amber-50 hover:ring-amber-300"}`}>
+      <div className="text-xs uppercase tracking-wide text-slate-500">{label}</div>
+      <div className={`mt-2 text-2xl font-semibold tabular-nums ${ok ? "text-emerald-600" : "text-amber-700"}`}>
+        {ok ? "✓ 0" : count}
+      </div>
+      <div className="mt-1 text-xs text-slate-500">{ok ? "alles gekoppeld" : `${unit} open → koppelen`}</div>
+    </Link>
+  );
+}
+
+/**
+ * Always-12-month revenue: stacked current-year bars (net + intercompany up to
+ * gross) with a previous-year comparison line overlaid.
+ */
+function RevenueChart({ data, currency, prevYear }: { data: MonthRevenue[]; currency: string; prevYear: number }) {
+  const max = Math.max(1, ...data.map((d) => Math.max(Math.abs(d.currentGross), Math.abs(d.previous))));
+  const prevPoints = data
+    .map((d, i) => `${((i + 0.5) / 12) * 100},${100 - (Math.max(0, d.previous) / max) * 100}`)
+    .join(" ");
+  return (
+    <div>
+      <div className="relative h-40">
+        <div className="flex items-end gap-1 h-40">
+          {data.map((d) => {
+            const netH = (Math.max(0, d.current) / max) * 100;
+            const icH = (Math.max(0, d.currentIc) / max) * 100;
+            return (
+              <div key={d.month} className="flex-1 h-full flex flex-col justify-end group relative">
+                <div className="w-full bg-rose-200" style={{ height: `${icH}%` }} title="Intercompany (geëlimineerd)" />
+                <div className="w-full bg-brand-500" style={{ height: `${netH}%` }} title="Netto omzet" />
+                <div className="absolute bottom-full mb-1 left-1/2 -translate-x-1/2 hidden group-hover:block bg-slate-800 text-white text-[10px] rounded px-2 py-1 whitespace-nowrap z-10">
+                  {MONTHS[d.month - 1]}: netto {formatMoney(d.current, currency)}
+                  {d.currentIc > 0.005 && <> · IC {formatMoney(d.currentIc, currency)}</>}
+                  {Math.abs(d.previous) > 0.005 && <> · {prevYear}: {formatMoney(d.previous, currency)}</>}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+        {/* Previous-year line */}
+        <svg className="absolute inset-0 w-full h-full pointer-events-none" viewBox="0 0 100 100" preserveAspectRatio="none">
+          <polyline points={prevPoints} fill="none" stroke="#475569" strokeWidth="0.7" vectorEffect="non-scaling-stroke" strokeDasharray="2 1.5" />
+        </svg>
+      </div>
+      <div className="flex gap-1 mt-1">
+        {MONTHS.map((m) => (
+          <div key={m} className="flex-1 text-center text-[10px] text-slate-400">{m}</div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -131,6 +169,8 @@ function StatusPill({ status }: { status: string | undefined | null }) {
 
 export function DashboardPage() {
   const { workspace, group, entity, dateFrom, dateTo, currency } = useScope();
+  const { user } = useAuth();
+  const on = (key: string) => isWidgetEnabled(user?.dashboardWidgets ?? undefined, key);
 
   const { data: subResp } = useQuery({
     queryKey: ["billing-subscription", workspace?.id],
@@ -184,51 +224,56 @@ export function DashboardPage() {
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                <KpiTile label="Cashpositie" value={kpis.cash} currency={kpis.currency} to="/data/general-ledger" />
-                <KpiTile
-                  label="Werkkapitaal"
-                  value={kpis.workingCapital.net}
-                  currency={kpis.currency}
-                />
-                <KpiTile
-                  label="Openstaande debiteuren"
-                  value={kpis.outstandingDebtors.net}
-                  currency={kpis.currency}
-                  gross={kpis.outstandingDebtors.gross}
-                  intercompany={kpis.outstandingDebtors.intercompany}
-                  to="/data/receivables"
-                />
-                <KpiTile
-                  label="Openstaande crediteuren"
-                  value={kpis.outstandingCreditors.net}
-                  currency={kpis.currency}
-                  gross={kpis.outstandingCreditors.gross}
-                  intercompany={kpis.outstandingCreditors.intercompany}
-                  to="/data/payables"
-                />
+                {on("cash") && <KpiTile label="Cashpositie" value={kpis.cash} currency={kpis.currency} to="/data/general-ledger" />}
+                {on("workingCapital") && (
+                  <KpiTile label="Werkkapitaal" value={kpis.workingCapital.net} currency={kpis.currency} />
+                )}
+                {on("receivables") && (
+                  <KpiTile
+                    label="Openstaande debiteuren"
+                    value={kpis.outstandingDebtors.net}
+                    currency={kpis.currency}
+                    gross={kpis.outstandingDebtors.gross}
+                    intercompany={kpis.outstandingDebtors.intercompany}
+                    to="/data/receivables"
+                  />
+                )}
+                {on("payables") && (
+                  <KpiTile
+                    label="Openstaande crediteuren"
+                    value={kpis.outstandingCreditors.net}
+                    currency={kpis.currency}
+                    gross={kpis.outstandingCreditors.gross}
+                    intercompany={kpis.outstandingCreditors.intercompany}
+                    to="/data/payables"
+                  />
+                )}
+                {on("unmappedRgs") && <WarningTile label="Nog toe te kennen RGS" count={kpis.unmappedRgsAccounts} unit="rekening(en)" to="/mappings/rgs" />}
+                {on("unmappedVat") && <WarningTile label="Nog toe te kennen BTW" count={kpis.unmappedVatCodes} unit="btw-code(s)" to="/administration/account-tax" />}
               </div>
 
-              {kpis.revenueByMonth.length > 0 && (
+              {on("revenue") && (
                 <div className="lf-card">
-                  <div className="flex items-center justify-between mb-3">
-                    <h3 className="font-semibold">Omzetontwikkeling per maand</h3>
+                  <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+                    <h3 className="font-semibold">Omzetontwikkeling per maand · {kpis.revenueYear}</h3>
                     <div className="text-xs text-slate-500">
                       Netto {formatMoney(kpis.revenueTotal.net, kpis.currency)}
                       {kpis.revenueTotal.intercompany > 0.005 && (
-                        <span className="text-rose-600">
-                          {" "}
-                          · −{formatMoney(kpis.revenueTotal.intercompany, kpis.currency)} intercompany
-                        </span>
+                        <span className="text-rose-600"> · −{formatMoney(kpis.revenueTotal.intercompany, kpis.currency)} intercompany</span>
                       )}
+                      <span className="text-slate-400"> · {kpis.revenuePrevYear}: {formatMoney(kpis.revenuePrevTotal, kpis.currency)}</span>
                     </div>
                   </div>
-                  <RevenueChart data={kpis.revenueByMonth} currency={kpis.currency} />
-                  <div className="mt-2 flex items-center gap-4 text-[11px] text-slate-500">
+                  <RevenueChart data={kpis.revenueByMonth} currency={kpis.currency} prevYear={kpis.revenuePrevYear} />
+                  <div className="mt-2 flex items-center gap-4 text-[11px] text-slate-500 flex-wrap">
                     <span className="flex items-center gap-1">
-                      <span className="inline-block w-3 h-3 bg-brand-500 rounded-sm" /> Netto omzet
+                      <span className="inline-block w-3 h-3 bg-brand-500 rounded-sm" /> Netto omzet {kpis.revenueYear}
                     </span>
                     <span className="flex items-center gap-1">
                       <span className="inline-block w-3 h-3 bg-rose-200 rounded-sm" /> Intercompany (geëlimineerd)
+                    </span>
+                    <span className="flex items-center gap-1">
+                      <span className="inline-block w-4 border-t-2 border-dashed border-slate-600" /> {kpis.revenuePrevYear}
                     </span>
                   </div>
                 </div>

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { isAdminRole, useScope } from "../contexts/ScopeContext";
 import { useAuth } from "../contexts/AuthContext";
 import { api, ApiError } from "../services/api";
+import { DASHBOARD_WIDGETS } from "../lib/dashboardWidgets";
 
 export function SettingsPage() {
   const { workspace, role, reload } = useScope();
@@ -60,7 +61,54 @@ export function SettingsPage() {
         </button>
       </div>
 
+      <DashboardWidgetsSection />
       <TwoFactorSection />
+    </div>
+  );
+}
+
+function DashboardWidgetsSection() {
+  const { user, refreshUser } = useAuth();
+  const [busy, setBusy] = useState<string | null>(null);
+  const disabled = user?.dashboardWidgets ?? [];
+
+  const toggle = async (key: string) => {
+    const next = disabled.includes(key) ? disabled.filter((k) => k !== key) : [...disabled, key];
+    setBusy(key);
+    try {
+      await api("/auth/me/dashboard", { method: "PUT", body: { disabled: next } });
+      await refreshUser();
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  return (
+    <div className="lf-card max-w-xl space-y-3">
+      <div>
+        <h2 className="text-lg font-semibold">Dashboard-widgets</h2>
+        <p className="text-sm text-slate-500 mt-1">Kies welke kerncijfers en waarschuwingen je op het dashboard ziet.</p>
+      </div>
+      <div className="divide-y divide-slate-100">
+        {DASHBOARD_WIDGETS.map((w) => {
+          const enabled = !disabled.includes(w.key);
+          return (
+            <label key={w.key} className="flex items-center justify-between py-2 cursor-pointer">
+              <div>
+                <div className="text-sm font-medium text-slate-800">{w.label}</div>
+                <div className="text-xs text-slate-500">{w.description}</div>
+              </div>
+              <input
+                type="checkbox"
+                className="h-4 w-4"
+                checked={enabled}
+                disabled={busy === w.key}
+                onChange={() => toggle(w.key)}
+              />
+            </label>
+          );
+        })}
+      </div>
     </div>
   );
 }
