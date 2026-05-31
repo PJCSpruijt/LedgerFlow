@@ -16,6 +16,7 @@ import {
   resolveRgsVersion,
 } from "../services/rgs-mapping.service.js";
 import { listSourceAccounts } from "../services/source-account.service.js";
+import { consolidate } from "../services/consolidation.service.js";
 import { convert, prefetchRates } from "../services/fx.service.js";
 import { BadRequestError, ForbiddenError, NotFoundError } from "../utils/errors.js";
 import type { TransactionLine } from "../clients/connectors/interfaces/Connector.js";
@@ -79,6 +80,8 @@ const OPENAPI = {
     "/payables": { get: { summary: "Open payables + aging (entityId)" } },
     "/relations": { get: { summary: "Debtors + creditors (entityId)" } },
     "/financial-statements": { get: { summary: "RGS-grouped balance + P&L (entityId, from, to)" } },
+    "/consolidated-trial-balance": { get: { summary: "Consolidated TB across the workspace/group, RGS-keyed (from, to, currency, groupId?)" } },
+    "/consolidated-financial-statements": { get: { summary: "Consolidated balance + P&L (from, to, currency, groupId?)" } },
     "/audit-trail": { get: { summary: "Workspace audit log (from, to, action)" } },
     "/auditfile": { get: { summary: "XAF-subset auditfile XML (entityId, from, to)" } },
   },
@@ -507,6 +510,102 @@ v1Router.get(
     });
     rows.sort((a, b) => a.statement.localeCompare(b.statement) || a.side.localeCompare(b.side) || a.rgs_group_code.localeCompare(b.rgs_group_code));
     await respond(req, res, rows, { period: { from, to }, currency });
+  }),
+);
+
+// ---- Consolidation (RGS-B) -------------------------------------------------
+
+/** Consolidate across the key's scope: an optional ?groupId, the key's pinned
+ *  entity (single-entity consolidation), or the whole workspace. */
+async function runConsolidation(req: Request, res: Response) {
+  const key = keyOf(res);
+  const { from, to, currency } = dateRange(req);
+  const groupId = String(req.query.groupId ?? "").trim() || null;
+  if (groupId) {
+    const g = await prisma.group.findFirst({ where: { id: groupId, workspaceId: key.workspaceId }, select: { id: true } });
+    if (!g) throw new NotFoundError("Groep niet gevonden in deze werkruimte");
+  }
+  const result = await consolidate({ workspaceId: key.workspaceId, groupId, from, to, currency });
+  return { key, result, from, to, currency };
+}
+
+v1Router.get(
+  "/consolidated-trial-balance",
+  asyncHandler(async (req, res) => {
+    const { key, result, from, to, currency } = await runConsolidation(req, res);
+    const rows = result.leaves
+      .map((l) => ({
+        workspace_id: key.workspaceId,
+        group_id: result.groupId,
+        statement: l.statement,
+        rgs_group_code: l.rgsGroupCode,
+        rgs_group_name: l.rgsGroupName,
+        rgs_code: l.rgsCode,
+        rgs_description: l.description,
+        debit: l.total > 0 ? l.total : 0,
+        credit: l.total < 0 ? -l.total : 0,
+        balance: l.total,
+        currency,
+        entities: l.byEntity.length,
+        is_consolidated: true,
+        is_elimination: false,
+        unmapped: l.unmapped,
+        generated_at: new Date().toISOString(),
+      }))
+      .sort((a, b) => a.statement.localeCompare(b.statement) || a.rgs_group_code.localeCompare(b.rgs_group_code) || String(a.rgs_code).localeCompare(String(b.rgs_code)));
+    await respond(req, res, rows, {
+      period: { from, to },
+      currency,
+      rgsVersion: result.rgsVersion,
+      entities: result.includedEntities,
+      warnings: result.warnings,
+    });
+  }),
+);
+
+v1Router.get(
+  "/consolidated-financial-statements",
+  asyncHandler(async (req, res) => {
+    const { key, result, from, to, currency } = await runConsolidation(req, res);
+    const groups = new Map<string, { code: string; name: string; dc: string | null; statement: string; balance: number; accounts: number }>();
+    for (const l of result.leaves) {
+      const g = groups.get(l.rgsGroupCode) ?? {
+        code: l.rgsGroupCode,
+        name: l.rgsGroupName,
+        dc: l.rgsGroupDc,
+        statement: l.statement,
+        balance: 0,
+        accounts: 0,
+      };
+      g.balance += l.total;
+      g.accounts += 1;
+      groups.set(l.rgsGroupCode, g);
+    }
+    const rows = [...groups.values()].map((g) => {
+      const side = g.statement === "PNL" ? "PNL" : PASSIVA_GROUPS.has(g.code) || g.dc === "C" ? "PASSIVA" : "ACTIVA";
+      const amount = g.statement === "PNL" || side === "PASSIVA" ? -g.balance : g.balance;
+      return {
+        workspace_id: key.workspaceId,
+        group_id: result.groupId,
+        statement: g.statement,
+        side,
+        rgs_group_code: g.code,
+        rgs_group_name: g.name,
+        amount,
+        currency,
+        accounts: g.accounts,
+        is_consolidated: true,
+        generated_at: new Date().toISOString(),
+      };
+    });
+    rows.sort((a, b) => a.statement.localeCompare(b.statement) || a.side.localeCompare(b.side) || a.rgs_group_code.localeCompare(b.rgs_group_code));
+    await respond(req, res, rows, {
+      period: { from, to },
+      currency,
+      rgsVersion: result.rgsVersion,
+      entities: result.includedEntities,
+      warnings: result.warnings,
+    });
   }),
 );
 

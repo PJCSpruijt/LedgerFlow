@@ -14,6 +14,8 @@ import { GeneralLedgerPage } from "../pages/GeneralLedgerPage";
 import { RelationsView } from "../pages/RelationsPage";
 import { OutstandingView } from "../pages/OutstandingView";
 import { FinancialStatementsPage } from "../pages/FinancialStatementsPage";
+import { ConsolidatedStatementsPage } from "../pages/ConsolidatedStatementsPage";
+import { ConsolidatedTrialBalancePage } from "../pages/ConsolidatedTrialBalancePage";
 import { BillingPage } from "../pages/BillingPage";
 import { SettingsPage } from "../pages/SettingsPage";
 import { AdminPage } from "../pages/AdminPage";
@@ -109,10 +111,11 @@ export const MODULES: ModuleDef[] = [
     basePath: "/consolidation",
     icon: "🧮",
     subpages: [
+      { path: "trial-balance", label: "Geconsolideerde proefbalans", element: <ConsolidatedTrialBalancePage /> },
+      { path: "statements", label: "Geconsolideerde jaarrekening", element: <ConsolidatedStatementsPage show="both" /> },
+      { path: "pnl", label: "Geconsolideerde W&V", element: <ConsolidatedStatementsPage show="pnl" /> },
+      { path: "balance-sheet", label: "Geconsolideerde balans", element: <ConsolidatedStatementsPage show="balance" /> },
       { path: "runs", label: "Consolidatieruns", element: soon("Consolidatieruns") },
-      { path: "trial-balance", label: "Geconsolideerde proefbalans", element: soon("Geconsolideerde proefbalans") },
-      { path: "pnl", label: "Geconsolideerde W&V", element: soon("Geconsolideerde W&V") },
-      { path: "balance-sheet", label: "Geconsolideerde balans", element: soon("Geconsolideerde balans") },
       { path: "intercompany", label: "Intercompany-matching", element: soon("Intercompany-matching") },
       { path: "elimination-rules", label: "Eliminatieregels", element: soon("Eliminatieregels") },
       { path: "elimination-entries", label: "Eliminatieboekingen", element: soon("Eliminatieboekingen") },

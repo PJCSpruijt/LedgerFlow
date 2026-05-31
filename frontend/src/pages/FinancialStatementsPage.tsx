@@ -5,6 +5,8 @@ import { useScope } from "../contexts/ScopeContext";
 import { api, ApiError } from "../services/api";
 import { formatMoney } from "../lib/period";
 import { ExportButtons } from "../components/ExportButtons";
+import { categorize, display, type Cat, type Side } from "../lib/rgsPresentation";
+import { ConsolidatedStatementsPage } from "./ConsolidatedStatementsPage";
 
 interface TbLine {
   glAccountCode: string;
@@ -20,100 +22,16 @@ interface TbLine {
   rgsGroupDc?: string | null;
 }
 
-type Side = "ACTIVA" | "PASSIVA" | "OVERIG";
-
-/**
- * Standard jaarrekening presentation order (Titel 9 BW model), mapped onto RGS
- * hoofdrubrieken. RGS's own referentienummer is a coding order, not a balance
- * presentation order (it interleaves equity/provisions between the assets), so
- * we encode the conventional sequence here; unknown rubrieken fall back to the
- * RGS referentienummer and are classified activa/passiva by their D/C nature.
- */
-const BALANCE_PRES: Record<string, { side: Side; order: number }> = {
-  BIva: { side: "ACTIVA", order: 1 }, // Immateriële vaste activa
-  BMva: { side: "ACTIVA", order: 2 }, // Materiële vaste activa
-  BVas: { side: "ACTIVA", order: 3 }, // Vastgoedbeleggingen
-  BFva: { side: "ACTIVA", order: 4 }, // Financiële vaste activa
-  BVrd: { side: "ACTIVA", order: 10 }, // Voorraden
-  BPro: { side: "ACTIVA", order: 11 }, // Onderhanden projecten
-  BOnd: { side: "ACTIVA", order: 11 },
-  BVor: { side: "ACTIVA", order: 12 }, // Vorderingen
-  BEff: { side: "ACTIVA", order: 13 }, // Effecten
-  BLim: { side: "ACTIVA", order: 14 }, // Liquide middelen
-  BEiv: { side: "PASSIVA", order: 1 }, // Eigen vermogen / groepsvermogen
-  BVev: { side: "PASSIVA", order: 1 },
-  BAdk: { side: "PASSIVA", order: 2 }, // Aandeel derden
-  BVrz: { side: "PASSIVA", order: 3 }, // Voorzieningen
-  BLas: { side: "PASSIVA", order: 4 }, // Langlopende schulden
-  BSch: { side: "PASSIVA", order: 5 }, // Kortlopende schulden
-};
-
-const PNL_PRES: Record<string, number> = {
-  WOmz: 1, // Netto-omzet
-  WWiv: 2, // Wijziging voorraden / onderhanden werk
-  WGac: 3, // Geactiveerde productie
-  WOvb: 4, // Overige bedrijfsopbrengsten
-  WKpr: 5, // Kostprijs van de omzet
-  WInk: 6, // Inkoopwaarde / uitbesteed werk
-  WPer: 7, // Personeelskosten
-  WAfs: 8, // Afschrijvingen
-  WWvi: 9, // Bijzondere waardeverminderingen
-  WBed: 10, // Overige bedrijfskosten
-  WFbe: 20, // Financiële baten en lasten
-  WBel: 30, // Belastingen
-  WRsd: 40, // Resultaat deelnemingen
-};
-
-interface Cat {
-  code: string;
-  name: string;
-  side: Side;
-  order: number;
-  lines: TbLine[];
-  raw: number; // sum of balance (debit − credit)
-}
-
-const numOrder = (ref?: string | null) => {
-  const n = Number.parseInt(ref ?? "", 10);
-  return Number.isNaN(n) ? 9999 : n;
-};
-
-/** Sign so that revenue/assets read positive in the statement. */
-const display = (balance: number, kind: "balance" | "pnl", side: Side) =>
-  kind === "pnl" ? -balance : side === "PASSIVA" ? -balance : balance;
-
-function categorize(rows: TbLine[], kind: "balance" | "pnl"): Cat[] {
-  const byCode = new Map<string, Cat>();
-  for (const r of rows) {
-    const code = r.rgsGroupCode || "zzzz";
-    const name = r.rgsGroupName || "Niet aan RGS gekoppeld";
-    const c =
-      byCode.get(code) ??
-      ({ code, name, side: "OVERIG", order: 9999, lines: [], raw: 0 } as Cat);
-    c.lines.push(r);
-    c.raw += r.balance;
-    byCode.set(code, c);
-  }
-  const cats = [...byCode.values()];
-  for (const c of cats) {
-    const sample = c.lines[0];
-    if (code_is_unmapped(c.code)) {
-      c.side = "OVERIG";
-      c.order = 99999;
-    } else if (kind === "balance") {
-      const pres = BALANCE_PRES[c.code];
-      c.side = pres?.side ?? (sample?.rgsGroupDc === "C" ? "PASSIVA" : "ACTIVA");
-      c.order = pres?.order ?? 900 + numOrder(sample?.rgsGroupOrder);
-    } else {
-      c.side = "OVERIG";
-      c.order = PNL_PRES[c.code] ?? 900 + numOrder(sample?.rgsGroupOrder);
-    }
-  }
-  return cats.sort((a, b) => a.order - b.order || a.code.localeCompare(b.code));
-}
-const code_is_unmapped = (code: string) => code === "zzzz";
-
 export function FinancialStatementsPage() {
+  const { view } = useScope();
+  // "Geconsolideerd" in the top bar → consolidated jaarrekening across the
+  // group/workspace instead of one administration. Switch at the component
+  // boundary so neither branch ever calls hooks conditionally.
+  if (view === "consolidated") return <ConsolidatedStatementsPage show="both" />;
+  return <SingleEntityStatements />;
+}
+
+function SingleEntityStatements() {
   const { entity, dateFrom, dateTo, currency } = useScope();
   const navigate = useNavigate();
   const range = { from: dateFrom, to: dateTo };
@@ -156,7 +74,7 @@ export function FinancialStatementsPage() {
     </tr>
   );
 
-  const CatRows = ({ cats, kind }: { cats: Cat[]; kind: "balance" | "pnl" }) =>
+  const CatRows = ({ cats, kind }: { cats: Cat<TbLine>[]; kind: "balance" | "pnl" }) =>
     cats.map((c) => {
       const isOpen = open.has(c.code);
       return (
@@ -183,7 +101,7 @@ export function FinancialStatementsPage() {
       );
     });
 
-  const Block = ({ label, cats, kind }: { label: string; cats: Cat[]; kind: "balance" | "pnl" }) => {
+  const Block = ({ label, cats, kind }: { label: string; cats: Cat<TbLine>[]; kind: "balance" | "pnl" }) => {
     if (cats.length === 0) return null;
     const total = cats.reduce((s, c) => s + display(c.raw, kind, c.side), 0);
     return (
