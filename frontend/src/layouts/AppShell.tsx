@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 import { isAdminRole, useScope, VIEW_LABELS, type ViewType } from "../contexts/ScopeContext";
@@ -6,6 +6,7 @@ import { api } from "../services/api";
 import { MODULES, type ModuleDef, type SubPage } from "../navigation/navConfig";
 import { useContextUrlSync } from "../navigation/useContextUrlSync";
 import { UserMenu } from "../components/UserMenu";
+import { ProductTour } from "../components/ProductTour";
 import { DateRangePicker } from "../components/DateRangePicker";
 import { Placeholder } from "../pages/Placeholder";
 
@@ -46,6 +47,17 @@ export function AppShell() {
   const [adding, setAdding] = useState(false);
   useContextUrlSync();
 
+  // New-user product tour: auto-show once per user (persisted in localStorage),
+  // re-launchable from the user menu.
+  const [tourOpen, setTourOpen] = useState(false);
+  useEffect(() => {
+    if (user?.id && !localStorage.getItem(`fh_tour_${user.id}`)) setTourOpen(true);
+  }, [user?.id]);
+  const closeTour = () => {
+    setTourOpen(false);
+    if (user?.id) localStorage.setItem(`fh_tour_${user.id}`, "1");
+  };
+
   const isPlatformAdmin = user?.platformRole === "PLATFORM_ADMIN";
   // Subpages a normal user may see: scaffolds are hidden unless platform admin.
   const visibleSubpages = (m: ModuleDef): SubPage[] =>
@@ -82,6 +94,7 @@ export function AppShell() {
 
   return (
     <div className="min-h-screen flex flex-col bg-slate-50">
+      {tourOpen && <ProductTour modules={accessibleModules} onClose={closeTour} />}
       {/* Top context bar */}
       <header className="h-14 flex items-center gap-4 px-4 bg-white border-b border-slate-200">
         <div className="flex items-center gap-2 pr-2 shrink-0">
@@ -168,7 +181,7 @@ export function AppShell() {
             ))}
           </select>
           <div className="flex items-center pl-2 border-l border-slate-200">
-            <UserMenu />
+            <UserMenu onStartTour={() => setTourOpen(true)} />
           </div>
         </div>
       </header>

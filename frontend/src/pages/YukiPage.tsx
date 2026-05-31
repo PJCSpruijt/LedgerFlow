@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { api, ApiError } from "../services/api";
 import { isAdminRole, useScope } from "../contexts/ScopeContext";
+import { ConnectorWizard } from "../components/ConnectorWizard";
 
 type Kind = "yuki" | "eboekhouden";
 type DbKind = "YUKI" | "EBOEKHOUDEN";
@@ -58,6 +59,8 @@ const StatusBadge = ({ connected }: { connected: boolean }) =>
 export function YukiPage() {
   const { entity, workspace, reload, selectEntity } = useScope();
   const [view, setView] = useState<"entity" | "workspace">("entity");
+  const [wizardOpen, setWizardOpen] = useState(false);
+  const [bump, setBump] = useState(0);
   const [all, setAll] = useState<WorkspaceConn[] | null>(null);
 
   const [conn, setConn] = useState<ConnectionInfo | null>(null);
@@ -94,7 +97,7 @@ export function YukiPage() {
         /* ignore */
       }
     })();
-  }, [entity?.id]);
+  }, [entity?.id, bump]);
 
   // Workspace overview.
   const loadAll = async () => {
@@ -167,6 +170,7 @@ export function YukiPage() {
 
   return (
     <div className="space-y-6">
+      {wizardOpen && <ConnectorWizard onClose={() => { setWizardOpen(false); setBump((b) => b + 1); }} />}
       <div className="flex items-center justify-between flex-wrap gap-2">
         <div>
           <h1 className="text-2xl font-semibold">Koppelingen</h1>
@@ -174,6 +178,12 @@ export function YukiPage() {
             Koppel administraties aan Yuki of e-Boekhouden.
           </p>
         </div>
+        <div className="flex items-center gap-2">
+        {entity && canEdit && (
+          <button className="lf-btn-primary text-xs" onClick={() => setWizardOpen(true)}>
+            ⚙️ Koppeling instellen (wizard)
+          </button>
+        )}
         <div className="inline-flex rounded-md border border-slate-200 overflow-hidden text-xs">
           <button
             className={`px-3 py-1.5 ${view === "entity" ? "bg-brand-50 text-brand-700 font-medium" : "text-slate-500 hover:bg-slate-50"}`}
@@ -187,6 +197,7 @@ export function YukiPage() {
           >
             Hele werkruimte
           </button>
+        </div>
         </div>
       </div>
 

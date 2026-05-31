@@ -55,7 +55,7 @@ const STATUS_LABELS: Record<string, string> = {
  * Top-bar account menu: an initials avatar that opens a dropdown with the
  * user's name / e-mail / subscription, a link to Instellingen, and logout.
  */
-export function UserMenu() {
+export function UserMenu({ onStartTour }: { onStartTour?: () => void } = {}) {
   const { user, logout, refreshUser } = useAuth();
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
@@ -193,6 +193,17 @@ export function UserMenu() {
             </div>
           </div>
           <nav className="py-1 text-sm">
+            {onStartTour && (
+              <button
+                className="w-full text-left px-4 py-2 text-slate-700 hover:bg-slate-50"
+                onClick={() => {
+                  setOpen(false);
+                  onStartTour();
+                }}
+              >
+                🧭 Rondleiding
+              </button>
+            )}
             <button
               className="w-full text-left px-4 py-2 text-slate-700 hover:bg-slate-50"
               onClick={() => go("/administration/settings")}
