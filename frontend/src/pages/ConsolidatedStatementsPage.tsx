@@ -296,8 +296,8 @@ export function ConsolidatedStatementsPage({ show = "both" }: { show?: "both" | 
           <div className="font-medium">Intercompany niet in evenwicht:</div>
           {data.imbalances.map((im, i) => (
             <div key={i}>
-              ⚠️ {im.fromEntityName} → {im.toEntityName}: vordering {formatMoney(im.receivable, currency)} vs schuld{" "}
-              {formatMoney(im.payable, currency)} (verschil {formatMoney(im.diff, currency)})
+              ⚠️ {im.fromEntityName} ↔ {im.toEntityName}: onderlinge saldi vallen niet tegen elkaar weg — verschil{" "}
+              {formatMoney(im.diff, currency)}.
             </div>
           ))}
         </div>

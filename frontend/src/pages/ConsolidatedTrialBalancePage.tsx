@@ -79,9 +79,20 @@ export function ConsolidatedTrialBalancePage() {
   const cols = data?.includedEntities ?? [];
   const showEntityCols = !collapsed && cols.length > 0;
 
+  // Intercompany elimination per RGS leaf (keyed to the matching gross row).
+  const elimByKey = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const e of data?.eliminations ?? []) m.set(e.key, (m.get(e.key) ?? 0) + e.total);
+    return m;
+  }, [data]);
+
   const blocks = useMemo<GroupBlock[]>(() => {
+    const grossKeys = new Set((data?.leaves ?? []).map((l) => l.key));
+    // Gross leaves + any elimination leaves with no matching gross row (shown as their own line).
+    const all: Leaf[] = [...(data?.leaves ?? [])];
+    for (const e of data?.eliminations ?? []) if (!grossKeys.has(e.key)) all.push({ ...e, total: 0, byEntity: [] });
     const byGroup = new Map<string, GroupBlock>();
-    for (const l of data?.leaves ?? []) {
+    for (const l of all) {
       const b =
         byGroup.get(l.rgsGroupCode) ??
         ({ code: l.rgsGroupCode, name: l.rgsGroupName, statement: l.statement, order: 900 + numOrder(l.rgsGroupOrder), leaves: [] } as GroupBlock);
@@ -92,19 +103,14 @@ export function ConsolidatedTrialBalancePage() {
     return [...byGroup.values()].sort((a, b) => a.statement.localeCompare(b.statement) || a.order - b.order || a.code.localeCompare(b.code));
   }, [data]);
 
-  // Intercompany elimination per RGS hoofdrubriek (group-level journal).
-  const elimByGroup = useMemo(() => {
-    const m = new Map<string, number>();
-    for (const e of data?.eliminations ?? []) m.set(e.rgsGroupCode, (m.get(e.rgsGroupCode) ?? 0) + e.total);
-    return m;
-  }, [data]);
-  const totalElim = [...elimByGroup.values()].reduce((s, v) => s + v, 0);
+  const leafElim = (l: Leaf) => (showElim ? elimByKey.get(l.key) ?? 0 : 0);
+  const totalElim = showElim ? [...elimByKey.values()].reduce((s, v) => s + v, 0) : 0;
 
   const amountFor = (l: Leaf, entityId: string) => l.byEntity.find((b) => b.entityId === entityId)?.amount ?? 0;
-  const colTotal = (entityId: string) => (data?.leaves ?? []).reduce((s, l) => s + amountFor(l, entityId), 0);
-  const grossTotal = (data?.leaves ?? []).reduce((s, l) => s + l.total, 0);
+  const colTotal = (entityId: string) => blocks.reduce((s, b) => s + b.leaves.reduce((t, l) => t + amountFor(l, entityId), 0), 0);
+  const grossTotal = blocks.reduce((s, b) => s + b.leaves.reduce((t, l) => t + l.total, 0), 0);
   const groupGross = (b: GroupBlock) => b.leaves.reduce((s, l) => s + l.total, 0);
-  const groupElim = (b: GroupBlock) => (showElim ? elimByGroup.get(b.code) ?? 0 : 0);
+  const groupElim = (b: GroupBlock) => b.leaves.reduce((s, l) => s + leafElim(l), 0);
 
   // Number of trailing value columns besides per-entity ones (Eliminatie?, Geconsolideerd/Totaal).
   const consolidatedLabel = showElim ? "Geconsolideerd" : "Totaal";
@@ -165,8 +171,8 @@ export function ConsolidatedTrialBalancePage() {
           <div className="font-medium">Intercompany niet in evenwicht:</div>
           {data.imbalances.map((im, i) => (
             <div key={i}>
-              ⚠️ {im.fromEntityName} → {im.toEntityName}: vordering {formatMoney(im.receivable, currency)} vs schuld{" "}
-              {formatMoney(im.payable, currency)} (verschil {formatMoney(im.diff, currency)})
+              ⚠️ {im.fromEntityName} ↔ {im.toEntityName}: onderlinge saldi vallen niet tegen elkaar weg — verschil{" "}
+              {formatMoney(im.diff, currency)}.
             </div>
           ))}
         </div>
@@ -229,23 +235,30 @@ export function ConsolidatedTrialBalancePage() {
                     {b.leaves
                       .slice()
                       .sort((x, y) => (x.rgsCode ?? "").localeCompare(y.rgsCode ?? "") || x.description.localeCompare(y.description))
-                      .map((l) => (
-                        <tr key={l.key} className="border-b border-slate-50 hover:bg-slate-50">
-                          <td className="py-1 pr-4 pl-4 font-mono text-slate-500 whitespace-nowrap">{l.rgsCode ?? "—"}</td>
-                          <td className="py-1 pr-4">{l.description}</td>
-                          {showEntityCols &&
-                            cols.map((c) => {
-                              const v = amountFor(l, c.id);
-                              return (
-                                <td key={c.id} className={`py-1 px-3 text-right whitespace-nowrap ${v === 0 ? "text-slate-300" : ""}`}>
-                                  {v === 0 ? "·" : formatMoney(v, currency)}
-                                </td>
-                              );
-                            })}
-                          {showElim && <td className="py-1 px-3 text-right whitespace-nowrap text-slate-300">·</td>}
-                          <td className="py-1 pl-3 text-right whitespace-nowrap font-medium">{formatMoney(l.total, currency)}</td>
-                        </tr>
-                      ))}
+                      .map((l) => {
+                        const le = leafElim(l);
+                        return (
+                          <tr key={l.key} className="border-b border-slate-50 hover:bg-slate-50">
+                            <td className="py-1 pr-4 pl-4 font-mono text-slate-500 whitespace-nowrap">{l.rgsCode ?? "—"}</td>
+                            <td className="py-1 pr-4">{l.description}</td>
+                            {showEntityCols &&
+                              cols.map((c) => {
+                                const v = amountFor(l, c.id);
+                                return (
+                                  <td key={c.id} className={`py-1 px-3 text-right whitespace-nowrap ${v === 0 ? "text-slate-300" : ""}`}>
+                                    {v === 0 ? "·" : formatMoney(v, currency)}
+                                  </td>
+                                );
+                              })}
+                            {showElim && (
+                              <td className={`py-1 px-3 text-right whitespace-nowrap ${le ? "text-rose-700" : "text-slate-300"}`}>
+                                {le ? formatMoney(le, currency) : "·"}
+                              </td>
+                            )}
+                            <td className="py-1 pl-3 text-right whitespace-nowrap font-medium">{formatMoney(l.total + le, currency)}</td>
+                          </tr>
+                        );
+                      })}
                   </Fragment>
                 );
               })}

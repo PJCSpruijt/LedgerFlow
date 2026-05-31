@@ -1,8 +1,8 @@
 import { prisma } from "../config/prisma.js";
 import { tryGetConnectorForEntity } from "../clients/connectors/registry.js";
-import type { Connector } from "../clients/connectors/interfaces/Connector.js";
+import type { Connector, TrialBalanceLine } from "../clients/connectors/interfaces/Connector.js";
 import { applyRgsMappings, resolveRgsVersion } from "./rgs-mapping.service.js";
-import { getIntercompanyMap } from "./intercompany.service.js";
+import { getIntercompanyRelations, normName, type IcRel } from "./intercompany.service.js";
 import { convert, prefetchRates } from "./fx.service.js";
 
 /**
@@ -220,20 +220,14 @@ export async function consolidate(input: ConsolidationInput): Promise<Consolidat
     warnings.push("Geen enkele administratie in deze scope kon worden geladen.");
   }
 
-  // Intercompany elimination (optional): net out mutual receivables/payables.
+  // Intercompany elimination (optional): net out mutual balances per account.
   const entityIds = loaded.map((e) => e.ent.id);
-  const icMap = await getIntercompanyMap(entityIds);
-  const intercompanyConfigured = [...icMap.values()].some((m) => m.size > 0);
+  const icRels = await getIntercompanyRelations(entityIds);
+  const intercompanyConfigured = [...icRels.values()].some((a) => a.length > 0);
   let eliminations: ConsolLeafRow[] = [];
   let imbalances: ImbalanceWarning[] = [];
   if (input.eliminate && intercompanyConfigured) {
-    const elim = await computeEliminations(
-      loaded.map((e) => ({ id: e.ent.id, name: e.ent.name, connector: e.connector })),
-      icMap,
-      currency,
-      rgsVersion,
-      warnings,
-    );
+    const elim = await computeEliminations(loaded, icRels, workspaceId, currency, from, to, warnings);
     eliminations = elim.eliminations;
     imbalances = elim.imbalances;
   }
@@ -256,125 +250,168 @@ export async function consolidate(input: ConsolidationInput): Promise<Consolidat
   };
 }
 
+type LoadedEntity = { ent: { id: string; name: string; groupId: string }; lines: TrialBalanceLine[]; connector: Connector };
+
+interface AccountMeta {
+  balance: number; // reporting currency, debit − credit
+  name: string;
+  rgsCode: string | null;
+  rgsGroupCode: string;
+  rgsGroupName: string;
+  rgsGroupDc: string | null;
+  rgsGroupOrder: string | null;
+  statement: "PNL" | "BALANCE";
+}
+
+/** RGS codes that are intercompany by definition (vorderingen/schulden op
+ *  groepsmaatschappijen, rekening-courant groepsmij). For these the whole
+ *  closing balance is intercompany, so the full leaf balance is eliminated. */
+const isIntragroupCode = (rgs: string | null): boolean =>
+  !!rgs && (rgs.startsWith("BVorVog") || rgs.startsWith("BSchSag") || rgs.startsWith("BSchScg"));
+
 /**
  * Build intercompany elimination lines + imbalance warnings from each entity's
- * open receivables/payables per relation. A relation mapped to a counterparty
- * entity is intercompany: its open receivable in A should equal the open payable
- * in B. Eliminations remove both legs; a mismatch is flagged as an imbalance.
+ * transactions tagged with a counterparty relation. The relation mapping marks
+ * which contactName is another administration; postings carrying it are
+ * intercompany. For dedicated intragroup accounts (RGS BVorVog/BSchSag) the full
+ * closing balance is eliminated; otherwise the intercompany flow in the period.
+ * Eliminations are keyed to the same RGS leaf as the gross figure, so they show
+ * on the exact grootboekrekening. A mismatch between two administrations' mutual
+ * balance-sheet positions is flagged as an imbalance.
  */
 async function computeEliminations(
-  entities: { id: string; name: string; connector: Connector }[],
-  icMap: Map<string, Map<string, string>>,
+  loaded: LoadedEntity[],
+  icRels: Map<string, IcRel[]>,
+  workspaceId: string,
   currency: string,
-  rgsVersion: string,
+  from: string,
+  to: string,
   warnings: string[],
 ): Promise<{ eliminations: ConsolLeafRow[]; imbalances: ImbalanceWarning[] }> {
-  const nameById = new Map(entities.map((e) => [e.id, e.name]));
-  // recv[a][b] = a's open receivable attributed to counterparty b. pay[a][b] = a's payable to b.
-  const recv = new Map<string, Map<string, number>>();
-  const pay = new Map<string, Map<string, number>>();
-  const bump = (m: Map<string, Map<string, number>>, a: string, b: string, v: number) => {
-    const inner = m.get(a) ?? new Map<string, number>();
+  const nameById = new Map(loaded.map((e) => [e.ent.id, e.ent.name]));
+
+  // Per-entity, per-account closing balance (reporting currency) + RGS metadata.
+  const balByEntity = new Map<string, Map<string, AccountMeta>>();
+  for (const { ent, lines } of loaded) {
+    const m = new Map<string, AccountMeta>();
+    for (const l of lines) {
+      const conv = await convert(l.balance, (l.currency || currency).toUpperCase(), currency, to);
+      m.set(l.glAccountCode, {
+        balance: conv ?? l.balance,
+        name: l.glAccountName,
+        rgsCode: l.rgsCode ?? null,
+        rgsGroupCode: l.rgsGroupCode || (l.rgsCode ? l.rgsCode.slice(0, 4) : "zzzz"),
+        rgsGroupName: l.rgsGroupName || "Niet aan RGS gekoppeld",
+        rgsGroupDc: l.rgsGroupDc ?? null,
+        rgsGroupOrder: l.rgsGroupOrder ?? null,
+        statement: l.accountType === "PROFIT_LOSS" ? "PNL" : "BALANCE",
+      });
+    }
+    balByEntity.set(ent.id, m);
+  }
+
+  const elimByKey = new Map<string, ConsolLeafRow>();
+  // Balance-sheet net position per (entity, counterparty) for the imbalance check.
+  const netBS = new Map<string, Map<string, number>>();
+  const bumpNet = (a: string, b: string, v: number) => {
+    const inner = netBS.get(a) ?? new Map<string, number>();
     inner.set(b, (inner.get(b) ?? 0) + v);
-    m.set(a, inner);
+    netBS.set(a, inner);
   };
 
-  for (const e of entities) {
-    const mapped = icMap.get(e.id);
-    if (!mapped || mapped.size === 0) continue;
+  for (const { ent, connector } of loaded) {
+    const rels = icRels.get(ent.id);
+    if (!rels || rels.length === 0) continue;
+    const nameToCp = new Map<string, string>();
+    for (const r of rels) if (r.relationName) nameToCp.set(normName(r.relationName), r.counterpartyEntityId);
+
+    let txns;
     try {
-      const [deb, cre] = await Promise.all([e.connector.getOutstanding("debtor"), e.connector.getOutstanding("creditor")]);
-      for (const it of deb) {
-        const cp = mapped.get(it.relationId);
-        if (cp) bump(recv, e.id, cp, it.openAmount);
+      txns = await applyRgsMappings(await connector.getTransactions({ from, to }), workspaceId, ent.id);
+    } catch (e) {
+      warnings.push(`${ent.name}: transacties voor eliminatie konden niet worden opgehaald (${e instanceof Error ? e.message : "fout"}).`);
+      continue;
+    }
+    await prefetchRates(txns.map((t) => ({ date: t.date, from: (t.currency || currency).toUpperCase() })), currency);
+
+    // Per account: intercompany flow, whether any external contact appears, and the dominant counterparty.
+    const perAcct = new Map<string, { ic: number; external: boolean; cpAmt: Map<string, number> }>();
+    for (const t of txns) {
+      const conv = await convert(t.amount, (t.currency || currency).toUpperCase(), currency, t.date);
+      const amt = conv ?? t.amount;
+      const a = perAcct.get(t.glAccountCode) ?? { ic: 0, external: false, cpAmt: new Map<string, number>() };
+      const cp = t.contactName ? nameToCp.get(normName(t.contactName)) : undefined;
+      if (cp) {
+        a.ic += amt;
+        a.cpAmt.set(cp, (a.cpAmt.get(cp) ?? 0) + amt);
+      } else if (t.contactName) {
+        a.external = true;
       }
-      for (const it of cre) {
-        const cp = mapped.get(it.relationId);
-        if (cp) bump(pay, e.id, cp, it.openAmount);
-      }
-    } catch (err) {
-      warnings.push(`${e.name}: openstaande posten voor eliminatie konden niet worden opgehaald (${err instanceof Error ? err.message : "fout"}).`);
+      perAcct.set(t.glAccountCode, a);
+    }
+
+    const bal = balByEntity.get(ent.id);
+    for (const [acct, agg] of perAcct) {
+      if (Math.abs(agg.ic) < 0.005) continue;
+      const meta = bal?.get(acct);
+      // Dominant counterparty on this account.
+      let cp = "";
+      let best = 0;
+      for (const [c, v] of agg.cpAmt) if (Math.abs(v) > Math.abs(best)) ((best = v), (cp = c));
+      // Dedicated intragroup accounts → eliminate the full closing balance;
+      // mixed accounts → eliminate only the intercompany flow in the period.
+      const eliminateFull = meta ? isIntragroupCode(meta.rgsCode) : false;
+      const elimAmount = eliminateFull && meta ? -meta.balance : -agg.ic;
+      if (Math.abs(elimAmount) < 0.005) continue;
+
+      const statement = meta?.statement ?? "BALANCE";
+      const key = meta?.rgsCode ? `R:${meta.rgsCode}` : `U:${ent.id}:${acct}`;
+      const row =
+        elimByKey.get(key) ??
+        ({
+          statement,
+          rgsGroupCode: meta?.rgsGroupCode ?? "zzzz",
+          rgsGroupName: meta?.rgsGroupName ?? "Niet aan RGS gekoppeld",
+          rgsGroupDc: meta?.rgsGroupDc ?? null,
+          rgsGroupOrder: meta?.rgsGroupOrder ?? null,
+          key,
+          rgsCode: meta?.rgsCode ?? null,
+          description: `Eliminatie — ${meta?.name ?? acct}`,
+          unmapped: !meta?.rgsCode,
+          isElimination: true,
+          total: 0,
+          byEntity: [],
+        } as ConsolLeafRow);
+      row.total += elimAmount;
+      const be = row.byEntity.find((x) => x.entityId === ent.id);
+      if (be) be.amount += elimAmount;
+      else row.byEntity.push({ entityId: ent.id, entityName: ent.name, amount: elimAmount });
+      elimByKey.set(key, row);
+
+      if (statement === "BALANCE" && cp) bumpNet(ent.id, cp, elimAmount);
     }
   }
 
-  // RGS hoofdrubriek metadata for the elimination buckets.
-  const rgs = await prisma.rgsAccount.findMany({
-    where: { version: rgsVersion, code: { in: ["BVor", "BSch"] } },
-    select: { code: true, description: true, referentienummer: true, dc: true },
-  });
-  const meta = new Map(rgs.map((r) => [r.code, r]));
-  const vorName = meta.get("BVor")?.description ?? "Vorderingen";
-  const schName = meta.get("BSch")?.description ?? "Kortlopende schulden";
+  const eliminations = [...elimByKey.values()].filter((r) => Math.abs(r.total) > 0.005);
 
-  // Aggregate elimination amounts per entity for the two buckets.
-  const recvByEntity: { entityId: string; entityName: string; amount: number }[] = [];
-  const payByEntity: { entityId: string; entityName: string; amount: number }[] = [];
-  let recvTotal = 0;
-  let payTotal = 0;
-  for (const [a, inner] of recv) {
-    const amt = [...inner.values()].reduce((s, v) => s + v, 0);
-    if (Math.abs(amt) < 0.005) continue;
-    recvByEntity.push({ entityId: a, entityName: nameById.get(a) ?? a, amount: -amt }); // remove the receivable (debit) → negative
-    recvTotal += -amt;
-  }
-  for (const [a, inner] of pay) {
-    const amt = [...inner.values()].reduce((s, v) => s + v, 0);
-    if (Math.abs(amt) < 0.005) continue;
-    payByEntity.push({ entityId: a, entityName: nameById.get(a) ?? a, amount: amt }); // remove the payable (credit) → positive
-    payTotal += amt;
-  }
-
-  const eliminations: ConsolLeafRow[] = [];
-  if (recvByEntity.length) {
-    eliminations.push({
-      statement: "BALANCE",
-      rgsGroupCode: "BVor",
-      rgsGroupName: vorName,
-      rgsGroupDc: meta.get("BVor")?.dc ?? "D",
-      rgsGroupOrder: meta.get("BVor")?.referentienummer ?? null,
-      key: "ELIM:RECV",
-      rgsCode: null,
-      description: "Eliminatie intercompany-vorderingen",
-      unmapped: false,
-      isElimination: true,
-      total: recvTotal,
-      byEntity: recvByEntity,
-    });
-  }
-  if (payByEntity.length) {
-    eliminations.push({
-      statement: "BALANCE",
-      rgsGroupCode: "BSch",
-      rgsGroupName: schName,
-      rgsGroupDc: meta.get("BSch")?.dc ?? "C",
-      rgsGroupOrder: meta.get("BSch")?.referentienummer ?? null,
-      key: "ELIM:PAY",
-      rgsCode: null,
-      description: "Eliminatie intercompany-schulden",
-      unmapped: false,
-      isElimination: true,
-      total: payTotal,
-      byEntity: payByEntity,
-    });
-  }
-
-  // Imbalance check per ordered pair: a's receivable on b vs b's payable to a.
+  // Imbalance: A's eliminated balance-sheet position with B should cancel B's with A.
   const imbalances: ImbalanceWarning[] = [];
-  for (const a of entities) {
-    for (const b of entities) {
-      if (a.id === b.id) continue;
-      const r = recv.get(a.id)?.get(b.id) ?? 0;
-      const p = pay.get(b.id)?.get(a.id) ?? 0;
-      if (Math.abs(r) < 0.005 && Math.abs(p) < 0.005) continue;
-      const diff = r - p;
+  const seen = new Set<string>();
+  for (const [a, inner] of netBS) {
+    for (const [b, va] of inner) {
+      const pairKey = [a, b].sort().join("|");
+      if (seen.has(pairKey)) continue;
+      seen.add(pairKey);
+      const vb = netBS.get(b)?.get(a) ?? 0;
+      const diff = va + vb;
       if (Math.abs(diff) > 0.01) {
         imbalances.push({
-          fromEntityId: a.id,
-          fromEntityName: a.name,
-          toEntityId: b.id,
-          toEntityName: b.name,
-          receivable: r,
-          payable: p,
+          fromEntityId: a,
+          fromEntityName: nameById.get(a) ?? a,
+          toEntityId: b,
+          toEntityName: nameById.get(b) ?? b,
+          receivable: -va,
+          payable: -vb,
           diff,
         });
       }

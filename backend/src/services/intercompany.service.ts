@@ -167,3 +167,35 @@ export async function getIntercompanyMap(entityIds: string[]): Promise<Map<strin
   }
   return out;
 }
+
+export interface IcRel {
+  relationId: string;
+  relationName: string | null;
+  counterpartyEntityId: string;
+}
+
+/** entityId → intercompany relations (with names, for transaction matching). */
+export async function getIntercompanyRelations(entityIds: string[]): Promise<Map<string, IcRel[]>> {
+  const rows = await prisma.intercompanyRelation.findMany({
+    where: { entityId: { in: entityIds } },
+    select: { entityId: true, relationId: true, relationName: true, counterpartyEntityId: true },
+  });
+  const out = new Map<string, IcRel[]>();
+  for (const r of rows) {
+    const arr = out.get(r.entityId) ?? [];
+    arr.push({ relationId: r.relationId, relationName: r.relationName, counterpartyEntityId: r.counterpartyEntityId });
+    out.set(r.entityId, arr);
+  }
+  return out;
+}
+
+/** Normalize a relation/contact name for matching transactions to relations. */
+export function normName(s: string): string {
+  return s
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .replace(/\b(b\.?v\.?|n\.?v\.?|holding|group|groep|gmbh|ltd|inc)\b/g, " ")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
