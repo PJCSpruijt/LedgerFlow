@@ -12,6 +12,7 @@ import {
   getConsolidationRun,
   deleteConsolidationRun,
 } from "../services/consolidation-run.service.js";
+import { listAdjustments, createAdjustment, deleteAdjustment } from "../services/consolidation-adjustment.service.js";
 import { NotFoundError } from "../utils/errors.js";
 import { validateParams } from "../middleware/validate.js";
 
@@ -150,6 +151,56 @@ consolidationRouter.delete(
   asyncHandler(async (req, res) => {
     const ok = await deleteConsolidationRun(req.scope!.workspaceId, String(req.params.id));
     if (!ok) throw new NotFoundError("Consolidatierun niet gevonden");
+    res.json({ ok: true });
+  }),
+);
+
+// ---- Consolidation adjustments (manual corrections) -----------------------
+
+consolidationRouter.get(
+  "/adjustments",
+  asyncHandler(async (req, res) => {
+    res.json({ adjustments: await listAdjustments(req.scope!.workspaceId, req.scope!.groupId ?? null) });
+  }),
+);
+
+const CreateAdjBody = z.object({
+  description: z.string().min(1).max(200),
+  debitRgsCode: z.string().min(2).max(40),
+  creditRgsCode: z.string().min(2).max(40),
+  amount: z.number().positive(),
+  currency: z.string().length(3).optional(),
+  effectiveDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  scope: z.enum(["group", "workspace"]).optional(),
+});
+
+consolidationRouter.post(
+  "/adjustments",
+  validateBody(CreateAdjBody),
+  asyncHandler(async (req, res) => {
+    const b = req.body as z.infer<typeof CreateAdjBody>;
+    const groupId = b.scope === "workspace" ? null : req.scope!.groupId ?? null;
+    const adj = await createAdjustment({
+      workspaceId: req.scope!.workspaceId,
+      groupId,
+      description: b.description,
+      debitRgsCode: b.debitRgsCode,
+      creditRgsCode: b.creditRgsCode,
+      amount: b.amount,
+      currency: b.currency ?? "EUR",
+      effectiveDate: b.effectiveDate,
+      userId: req.user?.id ?? null,
+    });
+    res.status(201).json({ adjustment: adj });
+  }),
+);
+
+consolidationRouter.delete(
+  "/adjustments/:id",
+  validateParams(IdParam),
+  asyncHandler(async (req, res) => {
+    const ok = await deleteAdjustment(req.scope!.workspaceId, String(req.params.id));
+    if (!ok) throw new NotFoundError("Correctie niet gevonden");
     res.json({ ok: true });
   }),
 );

@@ -18,6 +18,7 @@ import { ConsolidatedStatementsPage } from "../pages/ConsolidatedStatementsPage"
 import { ConsolidatedTrialBalancePage } from "../pages/ConsolidatedTrialBalancePage";
 import { IntercompanyMatchingPage } from "../pages/IntercompanyMatchingPage";
 import { ConsolidationRunsPage } from "../pages/ConsolidationRunsPage";
+import { ConsolidationAdjustmentsPage } from "../pages/ConsolidationAdjustmentsPage";
 import { BillingPage } from "../pages/BillingPage";
 import { SettingsPage } from "../pages/SettingsPage";
 import { AdminPage } from "../pages/AdminPage";
@@ -121,7 +122,7 @@ export const MODULES: ModuleDef[] = [
       { path: "intercompany", label: "Intercompany-matching", element: <IntercompanyMatchingPage /> },
       { path: "elimination-rules", label: "Eliminatieregels", element: soon("Eliminatieregels") },
       { path: "elimination-entries", label: "Eliminatieboekingen", element: soon("Eliminatieboekingen") },
-      { path: "adjustments", label: "Consolidatiecorrecties", element: soon("Consolidatiecorrecties") },
+      { path: "adjustments", label: "Consolidatiecorrecties", element: <ConsolidationAdjustmentsPage /> },
       { path: "currency-translation", label: "Valutaomrekening", element: soon("Valutaomrekening") },
       { path: "audit", label: "Consolidatie-audit", element: soon("Consolidatie-audit") },
     ],

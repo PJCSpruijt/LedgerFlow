@@ -40,6 +40,7 @@ interface ConsolResult {
   includedEntities: { id: string; name: string }[];
   leaves: Leaf[];
   eliminations: Leaf[];
+  adjustments?: Leaf[];
   imbalances: Imbalance[];
   intercompanyConfigured: boolean;
   warnings: string[];
@@ -79,18 +80,19 @@ export function ConsolidatedTrialBalancePage() {
   const cols = data?.includedEntities ?? [];
   const showEntityCols = !collapsed && cols.length > 0;
 
-  // Intercompany elimination per RGS leaf (keyed to the matching gross row).
+  // Intercompany eliminations + manual corrections per RGS leaf (keyed to the gross row).
+  const corrections = useMemo(() => [...(data?.eliminations ?? []), ...(data?.adjustments ?? [])], [data]);
   const elimByKey = useMemo(() => {
     const m = new Map<string, number>();
-    for (const e of data?.eliminations ?? []) m.set(e.key, (m.get(e.key) ?? 0) + e.total);
+    for (const e of corrections) m.set(e.key, (m.get(e.key) ?? 0) + e.total);
     return m;
-  }, [data]);
+  }, [corrections]);
 
   const blocks = useMemo<GroupBlock[]>(() => {
     const grossKeys = new Set((data?.leaves ?? []).map((l) => l.key));
-    // Gross leaves + any elimination leaves with no matching gross row (shown as their own line).
+    // Gross leaves + any correction leaves with no matching gross row (shown as their own line).
     const all: Leaf[] = [...(data?.leaves ?? [])];
-    for (const e of data?.eliminations ?? []) if (!grossKeys.has(e.key)) all.push({ ...e, total: 0, byEntity: [] });
+    for (const e of corrections) if (!grossKeys.has(e.key)) all.push({ ...e, total: 0, byEntity: [] });
     const byGroup = new Map<string, GroupBlock>();
     for (const l of all) {
       const b =
@@ -101,7 +103,7 @@ export function ConsolidatedTrialBalancePage() {
       byGroup.set(l.rgsGroupCode, b);
     }
     return [...byGroup.values()].sort((a, b) => a.statement.localeCompare(b.statement) || a.order - b.order || a.code.localeCompare(b.code));
-  }, [data]);
+  }, [data, corrections]);
 
   const leafElim = (l: Leaf) => (showElim ? elimByKey.get(l.key) ?? 0 : 0);
   const totalElim = showElim ? [...elimByKey.values()].reduce((s, v) => s + v, 0) : 0;
@@ -204,7 +206,7 @@ export function ConsolidatedTrialBalancePage() {
                   cols.map((c) => (
                     <th key={c.id} className="py-2 px-3 text-right whitespace-nowrap">{c.name}</th>
                   ))}
-                {showElim && <th className="py-2 px-3 text-right whitespace-nowrap text-rose-700">Eliminatie</th>}
+                {showElim && <th className="py-2 px-3 text-right whitespace-nowrap text-rose-700">Elim./correctie</th>}
                 <th className="py-2 pl-3 text-right whitespace-nowrap">{consolidatedLabel}</th>
               </tr>
             </thead>

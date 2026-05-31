@@ -53,6 +53,7 @@ export interface ConsolResult {
   includedEntities: { id: string; name: string }[];
   leaves: RawLeaf[];
   eliminations: RawLeaf[];
+  adjustments?: RawLeaf[];
   imbalances: Imbalance[];
   intercompanyConfigured: boolean;
   warnings: string[];
@@ -115,9 +116,10 @@ export function ConsolidatedStatementsPage({
   const leaves = useMemo<Leaf[]>(() => {
     if (!data) return [];
     const base = data.leaves.map(toLine);
-    const elim = data.eliminations.map(toLine);
-    if (view === "eliminations_only") return elim;
-    if (view === "after_eliminations") return [...base, ...elim];
+    // Eliminations + manual corrections together form the consolidation entries.
+    const corrections = [...data.eliminations, ...(data.adjustments ?? [])].map(toLine);
+    if (view === "eliminations_only") return corrections;
+    if (view === "after_eliminations") return [...base, ...corrections];
     return base;
   }, [data, view]);
 

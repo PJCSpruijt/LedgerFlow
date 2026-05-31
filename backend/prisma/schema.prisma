@@ -591,3 +591,23 @@ model ConsolidationRun {
   @@index([workspaceId, createdAt])
   @@index([groupId])
 }
+
+// Manual consolidation correction (double-entry): a journal the auto-elimination
+// can't infer — intercompany profit in inventory, reclassifications, roundings.
+// Applied on top of the consolidated figures for periods covering effectiveDate.
+model ConsolidationAdjustment {
+  id              String   @id @default(uuid())
+  workspaceId     String
+  groupId         String? // null = applies to the whole-workspace consolidation
+  description     String
+  debitRgsCode    String
+  creditRgsCode   String
+  amount          Float
+  currency        String   @default("EUR")
+  effectiveDate   String // YYYY-MM-DD
+  createdByUserId String?
+  createdAt       DateTime @default(now())
+
+  @@index([workspaceId])
+  @@index([groupId])
+}

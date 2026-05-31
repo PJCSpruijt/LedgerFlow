@@ -3,6 +3,7 @@ import { tryGetConnectorForEntity } from "../clients/connectors/registry.js";
 import type { Connector, TrialBalanceLine } from "../clients/connectors/interfaces/Connector.js";
 import { applyRgsMappings, resolveRgsVersion } from "./rgs-mapping.service.js";
 import { getIntercompanyRelations, normName, type IcRel } from "./intercompany.service.js";
+import { getAdjustmentLeaves } from "./consolidation-adjustment.service.js";
 import { convert, prefetchRates } from "./fx.service.js";
 
 /**
@@ -57,6 +58,8 @@ export interface ConsolLeafRow {
   unmapped: boolean;
   /** True for synthetic intercompany-elimination lines. */
   isElimination?: boolean;
+  /** True for manual consolidation-correction lines. */
+  isAdjustment?: boolean;
   /** Consolidated balance (debit − credit) in reporting currency. */
   total: number;
   /** Per-entity contribution to this line, in reporting currency. */
@@ -91,6 +94,8 @@ export interface ConsolidationResult {
   leaves: ConsolLeafRow[];
   /** Intercompany elimination lines (empty unless `eliminate` was requested). */
   eliminations: ConsolLeafRow[];
+  /** Manual consolidation-correction lines effective in the period. */
+  adjustments: ConsolLeafRow[];
   /** Mutual balances that don't reconcile between two administrations. */
   imbalances: ImbalanceWarning[];
   /** Whether any intercompany relations are configured for this scope. */
@@ -232,6 +237,9 @@ export async function consolidate(input: ConsolidationInput): Promise<Consolidat
     imbalances = elim.imbalances;
   }
 
+  // Manual consolidation corrections effective in this period (always applied).
+  const adjustments = await getAdjustmentLeaves(workspaceId, groupId, from, to, currency);
+
   return {
     from,
     to,
@@ -244,6 +252,7 @@ export async function consolidate(input: ConsolidationInput): Promise<Consolidat
     includedEntities: loaded.map((e) => ({ id: e.ent.id, name: e.ent.name })),
     leaves: [...byKey.values()],
     eliminations,
+    adjustments,
     imbalances,
     intercompanyConfigured,
     warnings: [...new Set(warnings)],
