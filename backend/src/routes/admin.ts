@@ -26,6 +26,7 @@ import {
   loadBundledRgs,
   searchRgsAccounts,
 } from "../services/rgs-import.service.js";
+import { getUsageSummary } from "../services/api-usage.service.js";
 import {
   isEmailConfigured,
   sendInvitationEmail,
@@ -1099,6 +1100,17 @@ adminRouter.patch(
 // RGS taxonomy (platform-global). Importing/refreshing the public RGS standard
 // and browsing it. Platform-admin only (guarded by the router-level middleware).
 // ---------------------------------------------------------------------------
+
+/** Connector / API usage summary for the platform statistics dashboard (#26). */
+const UsageQuery = z.object({ days: z.coerce.number().int().min(1).max(365).optional() });
+adminRouter.get(
+  "/usage",
+  validateQuery(UsageQuery),
+  asyncHandler(async (req, res) => {
+    const { days } = req.query as unknown as z.infer<typeof UsageQuery>;
+    res.json(await getUsageSummary(days ?? 30));
+  }),
+);
 
 /** Loaded RGS versions with their row counts. */
 adminRouter.get(

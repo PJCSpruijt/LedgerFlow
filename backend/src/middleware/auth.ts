@@ -26,7 +26,7 @@ export const requireAuth: RequestHandler = (req, _res, next) => {
   req.user = { id: sub, email, platformRole };
   // Make the user + a correlation id available to deep layers (API-usage ledger)
   // for the remainder of this request's async chain.
-  requestContext.enterWith({ correlationId: randomUUID(), userId: sub });
+  requestContext.enterWith({ correlationId: randomUUID(), userId: sub, initiatorType: "USER" });
   next();
 };
 

@@ -353,6 +353,13 @@ model ApiUsageLog {
   connectorType          String? // YUKI | EBOEKHOUDEN | MOCK
   connectorAccountId     String? // Connection.id
   sourceAdministrationId String?
+  // Channel dimension — distinguishes interactive user traffic from machine/API
+  // traffic, and the direction of the call. "Gebruiker bevraagt boekhoudpakket"
+  // = OUTBOUND + USER; "externe software bevraagt FIN//HUB" = INBOUND + API.
+  initiatorType          String    @default("USER") // USER | API | SYSTEM
+  direction              String    @default("OUTBOUND") // OUTBOUND (FIN//HUB→bron) | INBOUND (extern→FIN//HUB)
+  // External API client id when initiatorType = API (filled by the Output API, #30).
+  apiClientId            String?
   operationType          String // auth | token_refresh | coa_sync | transactions_sync | …
   endpointName           String // path or service.method
   httpMethod             String?
@@ -379,6 +386,7 @@ model ApiUsageLog {
   @@index([entityId, startedAt])
   @@index([connectorType, startedAt])
   @@index([success, startedAt])
+  @@index([initiatorType, startedAt])
 }
 
 // Cached daily FX rates (ECB via Frankfurter). Keyed by the REQUESTED date plus

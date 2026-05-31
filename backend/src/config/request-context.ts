@@ -8,6 +8,11 @@ import { AsyncLocalStorage } from "node:async_hooks";
 export interface RequestContext {
   correlationId: string;
   userId?: string;
+  /** Who initiated this request: an interactive UI user, an external API client,
+   *  or a system/cron job. Drives the channel split in usage statistics. */
+  initiatorType?: "USER" | "API" | "SYSTEM";
+  /** External API client id when initiatorType = "API" (Output API, #30). */
+  apiClientId?: string;
 }
 
 export const requestContext = new AsyncLocalStorage<RequestContext>();
