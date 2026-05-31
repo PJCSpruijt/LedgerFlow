@@ -1,5 +1,6 @@
 import { XMLParser } from "fast-xml-parser";
 import { YukiSoapClient, escapeXml } from "./YukiSoapClient.js";
+import type { ConnectorContext } from "../context.js";
 import { ConnectorError } from "../../../utils/errors.js";
 import type {
   Connector,
@@ -86,12 +87,16 @@ function str(v: unknown): string {
 
 export class YukiConnector implements Connector {
   readonly kind = "yuki" as const;
-  private readonly soap = new YukiSoapClient();
+  private readonly soap: YukiSoapClient;
   private cachedSession?: { sessionId: string; expiresAt: number };
 
-  constructor(private readonly creds: YukiCredentials) {
+  constructor(
+    private readonly creds: YukiCredentials,
+    ctx?: ConnectorContext,
+  ) {
     if (!creds.accessKey) throw new ConnectorError("Yuki accessKey is required");
     if (!creds.administrationId) throw new ConnectorError("Yuki administrationId is required");
+    this.soap = new YukiSoapClient(ctx);
   }
 
   /** Get a sessionID, reusing for up to ~10 minutes to limit auth calls. */

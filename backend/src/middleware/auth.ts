@@ -1,7 +1,9 @@
 import type { RequestHandler } from "express";
 import { PlatformRole, ScopedRole, ScopeLevel } from "@prisma/client";
 import { prisma } from "../config/prisma.js";
+import { randomUUID } from "node:crypto";
 import { verifyAccessToken } from "../services/auth.service.js";
+import { requestContext } from "../config/request-context.js";
 import {
   ForbiddenError,
   TwoFactorEnrollmentRequiredError,
@@ -22,6 +24,9 @@ export const requireAuth: RequestHandler = (req, _res, next) => {
   }
   const { sub, email, platformRole } = verifyAccessToken(token);
   req.user = { id: sub, email, platformRole };
+  // Make the user + a correlation id available to deep layers (API-usage ledger)
+  // for the remainder of this request's async chain.
+  requestContext.enterWith({ correlationId: randomUUID(), userId: sub });
   next();
 };
 

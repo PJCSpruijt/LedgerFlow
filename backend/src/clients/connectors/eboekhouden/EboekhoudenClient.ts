@@ -1,5 +1,7 @@
 import { ConnectorError } from "../../../utils/errors.js";
 import { logger } from "../../../config/logger.js";
+import type { ConnectorContext } from "../context.js";
+import { classifyOperation, logApiUsage, sha256 } from "../../../services/api-usage.service.js";
 
 /**
  * Low-level transport for the e-Boekhouden REST API (https://api.e-boekhouden.nl).
@@ -10,6 +12,9 @@ import { logger } from "../../../config/logger.js";
  *      "Bearer " prefix).
  * The session token is cached until shortly before it expires and re-minted on
  * demand (and once on a 401).
+ *
+ * Every outbound call is recorded in the API-usage ledger (#26) — metadata only,
+ * never the token or full payloads.
  */
 
 const BASE_URL = "https://api.e-boekhouden.nl";
@@ -20,28 +25,58 @@ export interface EboekhoudenCredentials {
   source?: string;
 }
 
+function rateLimit(headers: Headers) {
+  const num = (h: string) => {
+    const v = headers.get(h);
+    const n = v == null ? NaN : Number(v);
+    return Number.isFinite(n) ? n : null;
+  };
+  return {
+    rateLimitLimit: num("x-ratelimit-limit") ?? num("ratelimit-limit"),
+    rateLimitRemaining: num("x-ratelimit-remaining") ?? num("ratelimit-remaining"),
+  };
+}
+
 export class EboekhoudenClient {
   private token?: { value: string; expiresAt: number };
 
-  constructor(private readonly creds: EboekhoudenCredentials) {
+  constructor(
+    private readonly creds: EboekhoudenCredentials,
+    private readonly ctx?: ConnectorContext,
+  ) {
     if (!creds.accessToken) throw new ConnectorError("e-Boekhouden accessToken is required");
   }
 
   private async authenticate(): Promise<string> {
     const source = (this.creds.source ?? "LedgerFlow").slice(0, 10);
+    const startedAt = new Date();
     const res = await fetch(`${BASE_URL}/v1/session`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ accessToken: this.creds.accessToken, source }),
     });
+    const text = await res.text();
+    logApiUsage({
+      context: this.ctx ?? null,
+      startedAt,
+      endedAt: new Date(),
+      operationType: "token_refresh",
+      endpointName: "/v1/session",
+      httpMethod: "POST",
+      statusCode: res.status,
+      success: res.ok,
+      errorCode: res.ok ? null : String(res.status),
+      bytesReceived: text.length,
+      requestHash: sha256("POST /v1/session"),
+      responseHash: sha256(text),
+    });
     if (!res.ok) {
       throw new ConnectorError(`e-Boekhouden authenticatie mislukt (HTTP ${res.status})`, {
-        snippet: (await res.text()).slice(0, 300),
+        snippet: text.slice(0, 300),
       });
     }
-    const data = (await res.json()) as { token?: string; expiresIn?: number };
+    const data = JSON.parse(text) as { token?: string; expiresIn?: number };
     if (!data.token) throw new ConnectorError("e-Boekhouden gaf geen session-token terug");
-    // Refresh a minute before the server's stated expiry.
     this.token = { value: data.token, expiresAt: Date.now() + ((data.expiresIn ?? 3600) - 60) * 1000 };
     return this.token.value;
   }
@@ -61,21 +96,51 @@ export class EboekhoudenClient {
           .join("&")
       : "";
     const url = `${BASE_URL}${path}${qs}`;
+    const startedAt = new Date();
+    let retryCount = 0;
 
     let token = await this.session();
     let res = await fetch(url, { headers: { Authorization: token } });
     if (res.status === 401) {
       // Token may have expired early — re-auth once.
+      retryCount = 1;
       this.token = undefined;
       token = await this.session();
       res = await fetch(url, { headers: { Authorization: token } });
     }
+    const text = await res.text();
+    const records = (() => {
+      try {
+        const j = JSON.parse(text) as { items?: unknown[] };
+        return Array.isArray(j.items) ? j.items.length : null;
+      } catch {
+        return null;
+      }
+    })();
+    logApiUsage({
+      context: this.ctx ?? null,
+      startedAt,
+      endedAt: new Date(),
+      operationType: classifyOperation("EBOEKHOUDEN", path, "GET"),
+      endpointName: path,
+      httpMethod: "GET",
+      statusCode: res.status,
+      success: res.ok,
+      errorCode: res.ok ? null : String(res.status),
+      retryCount,
+      recordsReceived: records,
+      bytesReceived: text.length,
+      paginationCursor: query?.["offset"] != null ? String(query["offset"]) : null,
+      ...rateLimit(res.headers),
+      requestHash: sha256(`GET ${path}${qs}`),
+      responseHash: sha256(text),
+    });
+
     if (!res.ok) {
-      const snippet = (await res.text()).slice(0, 300);
-      logger.warn({ path, status: res.status, snippet }, "e-Boekhouden API error");
-      throw new ConnectorError(`e-Boekhouden ${path} gaf HTTP ${res.status}`, { snippet });
+      logger.warn({ path, status: res.status, snippet: text.slice(0, 300) }, "e-Boekhouden API error");
+      throw new ConnectorError(`e-Boekhouden ${path} gaf HTTP ${res.status}`, { snippet: text.slice(0, 300) });
     }
-    return (await res.json()) as T;
+    return JSON.parse(text) as T;
   }
 
   /** Revoke the current session token (best-effort). */

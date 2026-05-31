@@ -1,4 +1,5 @@
 import { EboekhoudenClient, type EboekhoudenCredentials } from "./EboekhoudenClient.js";
+import type { ConnectorContext } from "../context.js";
 export type { EboekhoudenCredentials } from "./EboekhoudenClient.js";
 import type {
   Connector,
@@ -94,8 +95,8 @@ export class EboekhoudenConnector implements Connector {
   private vatLedgersByCategory?: Map<string, LedgerInfo[]>;
   private readonly relationNames = new Map<number, string | null>();
 
-  constructor(creds: EboekhoudenCredentials) {
-    this.client = new EboekhoudenClient(creds);
+  constructor(creds: EboekhoudenCredentials, ctx?: ConnectorContext) {
+    this.client = new EboekhoudenClient(creds, ctx);
   }
 
   // category "VW" = winst-en-verlies (P&L); everything else is a balance account.

@@ -4,6 +4,7 @@ import { env } from "../../config/env.js";
 import { decryptJson } from "../../utils/crypto.js";
 import { NotFoundError, ConnectorError } from "../../utils/errors.js";
 import type { Connector } from "./interfaces/Connector.js";
+import type { ConnectorContext } from "./context.js";
 import { MockConnector } from "./mock/MockConnector.js";
 import { YukiConnector, type YukiCredentials } from "./yuki/YukiConnector.js";
 import {
@@ -16,15 +17,33 @@ export const NO_CONNECTOR_MESSAGE =
   "Geen koppeling geconfigureerd voor deze administratie. Configureer deze in Instellingen → Koppeling.";
 
 /** Instantiate the connector matching a connection's kind (decrypts credentials). */
-function instantiate(conn: Connection): Connector {
+function instantiate(conn: Connection, ctx?: ConnectorContext): Connector {
   switch (conn.kind) {
-    case "YUKI":
-      return new YukiConnector(decryptJson<YukiCredentials>(conn.encryptedCredentials));
+    case "YUKI": {
+      const creds = decryptJson<YukiCredentials>(conn.encryptedCredentials);
+      return new YukiConnector(creds, ctx ? { ...ctx, sourceAdministrationId: creds.administrationId } : undefined);
+    }
     case "EBOEKHOUDEN":
-      return new EboekhoudenConnector(decryptJson<EboekhoudenCredentials>(conn.encryptedCredentials));
+      return new EboekhoudenConnector(decryptJson<EboekhoudenCredentials>(conn.encryptedCredentials), ctx);
     default:
       throw new ConnectorError(`Onbekend koppelingstype: ${conn.kind}`);
   }
+}
+
+/** Build the usage-logging context for a connection (workspace/group/entity). */
+async function buildContext(conn: Connection): Promise<ConnectorContext | undefined> {
+  const entity = await prisma.entity.findUnique({
+    where: { id: conn.entityId },
+    select: { id: true, groupId: true, group: { select: { workspaceId: true } } },
+  });
+  if (!entity) return undefined;
+  return {
+    workspaceId: entity.group.workspaceId,
+    groupId: entity.groupId,
+    entityId: entity.id,
+    connectionId: conn.id,
+    connectorType: conn.kind as "YUKI" | "EBOEKHOUDEN",
+  };
 }
 
 /**
@@ -47,7 +66,7 @@ export async function tryGetConnectorForEntity(entityId: string): Promise<Connec
 
   const conn = await prisma.connection.findUnique({ where: { entityId } });
   if (!conn) return null;
-  return instantiate(conn);
+  return instantiate(conn, await buildContext(conn));
 }
 
 /**

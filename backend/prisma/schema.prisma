@@ -335,6 +335,52 @@ model RefreshToken {
   @@index([userId])
 }
 
+// Append-only ledger of EVERY outbound connector request (#26). Used for vendor
+// cost control, customer usage reporting, rate-limit management and (later) the
+// Output API's audit/lineage. SECURITY: never store API keys/tokens or full
+// sensitive payloads here — only hashes + sizes + metadata.
+model ApiUsageLog {
+  id                     String    @id @default(uuid())
+  requestId              String // unique per outbound HTTP/SOAP call
+  correlationId          String? // groups all calls within one inbound request
+  jobId                  String?
+  startedAt              DateTime
+  endedAt                DateTime
+  durationMs             Int
+  workspaceId            String?
+  groupId                String?
+  entityId               String?
+  connectorType          String? // YUKI | EBOEKHOUDEN | MOCK
+  connectorAccountId     String? // Connection.id
+  sourceAdministrationId String?
+  operationType          String // auth | token_refresh | coa_sync | transactions_sync | …
+  endpointName           String // path or service.method
+  httpMethod             String?
+  soapAction             String?
+  statusCode             Int?
+  success                Boolean
+  errorCode              String?
+  errorMessage           String?
+  retryCount             Int       @default(0)
+  recordsRequested       Int?
+  recordsReceived        Int?
+  bytesSent              Int?
+  bytesReceived          Int?
+  paginationCursor       String?
+  rateLimitLimit         Int?
+  rateLimitRemaining     Int?
+  rateLimitResetAt       DateTime?
+  initiatedBy            String? // user id (null for system/cron)
+  requestHash            String? // sha256 of redacted request descriptor
+  responseHash           String? // sha256 of response body
+  createdAt              DateTime  @default(now())
+
+  @@index([workspaceId, startedAt])
+  @@index([entityId, startedAt])
+  @@index([connectorType, startedAt])
+  @@index([success, startedAt])
+}
+
 // Cached daily FX rates (ECB via Frankfurter). Keyed by the REQUESTED date plus
 // the from/to currencies; rateDate is the actual ECB business day used (may drift
 // on weekends/holidays). Lets reporting convert to one currency cheaply.

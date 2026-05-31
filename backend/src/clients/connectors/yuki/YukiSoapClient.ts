@@ -2,6 +2,8 @@ import { request } from "undici";
 import { XMLParser } from "fast-xml-parser";
 import { ConnectorError } from "../../../utils/errors.js";
 import { logger } from "../../../config/logger.js";
+import type { ConnectorContext } from "../context.js";
+import { classifyOperation, logApiUsage, sha256 } from "../../../services/api-usage.service.js";
 
 /**
  * Low-level Yuki SOAP transport.
@@ -67,6 +69,8 @@ export interface YukiSoapOptions {
 }
 
 export class YukiSoapClient {
+  constructor(private readonly ctx?: ConnectorContext) {}
+
   /**
    * Authenticate(accessKey) → returns sessionID GUID.
    * The accessKey is the WebserviceAccessKey configured in the Yuki portal.
@@ -100,6 +104,7 @@ export class YukiSoapClient {
       "Yuki SOAP request",
     );
 
+    const startedAt = new Date();
     const { statusCode, body } = await request(url, {
       method: "POST",
       headers: {
@@ -121,6 +126,26 @@ export class YukiSoapClient {
       { service: opts.service, method: opts.method, statusCode, response: text },
       "Yuki SOAP response",
     );
+
+    // Usage ledger. NOTE: the request envelope contains the accessKey/sessionID,
+    // so we hash ONLY the service.method label — never the raw envelope.
+    logApiUsage({
+      context: this.ctx ?? null,
+      startedAt,
+      endedAt: new Date(),
+      operationType: classifyOperation("YUKI", opts.method),
+      endpointName: `${opts.service}.${opts.method}`,
+      soapAction: `${NAMESPACE}${opts.method}`,
+      httpMethod: "POST",
+      statusCode,
+      success: statusCode < 400,
+      errorCode: statusCode >= 400 ? String(statusCode) : null,
+      errorMessage: statusCode >= 400 ? text.slice(0, 200) : null,
+      bytesSent: envelope.length,
+      bytesReceived: text.length,
+      requestHash: sha256(`${opts.service}.${opts.method}`),
+      responseHash: sha256(text),
+    });
 
     if (statusCode >= 400) {
       logger.warn(
