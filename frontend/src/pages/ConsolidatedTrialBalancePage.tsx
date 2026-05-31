@@ -69,6 +69,14 @@ export function ConsolidatedTrialBalancePage() {
   const { workspace, group, entity, dateFrom, dateTo, currency } = useScope();
   const [showElim, setShowElim] = useState(true);
   const [collapsed, setCollapsed] = useState(false);
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
+
+  const toggleGroup = (code: string) =>
+    setCollapsedGroups((prev) => {
+      const n = new Set(prev);
+      n.has(code) ? n.delete(code) : n.add(code);
+      return n;
+    });
 
   const { data, isLoading, isError, error } = useQuery({
     queryKey: ["consolidation", workspace?.id, group?.id, entity?.id, dateFrom, dateTo, currency, true],
@@ -129,6 +137,18 @@ export function ConsolidatedTrialBalancePage() {
           </p>
         </div>
         <div className="flex items-center gap-3 no-print">
+          {data && blocks.length > 0 && (
+            <button
+              className="lf-link text-xs"
+              onClick={() =>
+                setCollapsedGroups((prev) =>
+                  prev.size >= blocks.length ? new Set() : new Set(blocks.map((b) => b.code)),
+                )
+              }
+            >
+              {collapsedGroups.size >= blocks.length ? "Klap alles open" : "Klap alles dicht (subtotalen)"}
+            </button>
+          )}
           {data && cols.length > 0 && (
             <button className="lf-link text-xs" onClick={() => setCollapsed((v) => !v)}>
               {collapsed ? "Toon administraties" : "Vouw samen tot geconsolideerd"}
@@ -214,10 +234,16 @@ export function ConsolidatedTrialBalancePage() {
               {blocks.map((b) => {
                 const gGross = groupGross(b);
                 const gElim = groupElim(b);
+                const isCollapsed = collapsedGroups.has(b.code);
                 return (
                   <Fragment key={b.code}>
-                    <tr className="bg-slate-50/70 border-b border-slate-200">
+                    <tr
+                      className="bg-slate-50/70 border-b border-slate-200 cursor-pointer hover:bg-slate-100"
+                      onClick={() => toggleGroup(b.code)}
+                      title={isCollapsed ? "Klap open" : "Klap dicht"}
+                    >
                       <td className="py-1.5 pr-4 font-medium" colSpan={2}>
+                        <span className="inline-block w-4 text-slate-400">{isCollapsed ? "▸" : "▾"}</span>
                         <span className="text-xs text-slate-400 mr-2">{b.statement === "PNL" ? "W&V" : "Balans"}</span>
                         {b.name}
                       </td>
@@ -234,7 +260,8 @@ export function ConsolidatedTrialBalancePage() {
                       )}
                       <td className="py-1.5 pl-3 text-right font-semibold whitespace-nowrap">{formatMoney(gGross + gElim, currency)}</td>
                     </tr>
-                    {b.leaves
+                    {!isCollapsed &&
+                      b.leaves
                       .slice()
                       .sort((x, y) => (x.rgsCode ?? "").localeCompare(y.rgsCode ?? "") || x.description.localeCompare(y.description))
                       .map((l) => {
