@@ -16,8 +16,30 @@ interface Leaf extends StmtLine {
   key: string;
   rgsCode: string | null;
   unmapped: boolean;
+  isElimination: boolean;
   total: number;
   byEntity: EntityAmount[];
+}
+interface RawLeaf {
+  statement: "PNL" | "BALANCE";
+  rgsGroupCode: string;
+  rgsGroupName: string;
+  rgsGroupDc: string | null;
+  rgsGroupOrder: string | null;
+  key: string;
+  rgsCode: string | null;
+  description: string;
+  unmapped: boolean;
+  isElimination?: boolean;
+  total: number;
+  byEntity: EntityAmount[];
+}
+interface Imbalance {
+  fromEntityName: string;
+  toEntityName: string;
+  receivable: number;
+  payable: number;
+  diff: number;
 }
 interface ConsolResult {
   from: string;
@@ -29,24 +51,15 @@ interface ConsolResult {
   groupName: string | null;
   entities: { entityId: string; entityName: string; included: boolean; reason?: string }[];
   includedEntities: { id: string; name: string }[];
-  leaves: {
-    statement: "PNL" | "BALANCE";
-    rgsGroupCode: string;
-    rgsGroupName: string;
-    rgsGroupDc: string | null;
-    rgsGroupOrder: string | null;
-    key: string;
-    rgsCode: string | null;
-    description: string;
-    unmapped: boolean;
-    total: number;
-    byEntity: EntityAmount[];
-  }[];
+  leaves: RawLeaf[];
+  eliminations: RawLeaf[];
+  imbalances: Imbalance[];
+  intercompanyConfigured: boolean;
   warnings: string[];
 }
 
 /** Map a consolidation leaf onto the shared statement-line shape. */
-const toLine = (l: ConsolResult["leaves"][number]): Leaf => ({
+const toLine = (l: RawLeaf): Leaf => ({
   glAccountCode: l.rgsCode ?? l.key,
   glAccountName: l.description,
   balance: l.total,
@@ -58,6 +71,7 @@ const toLine = (l: ConsolResult["leaves"][number]): Leaf => ({
   key: l.key,
   rgsCode: l.rgsCode,
   unmapped: l.unmapped,
+  isElimination: l.isElimination ?? false,
   total: l.total,
   byEntity: l.byEntity,
 });
@@ -69,21 +83,67 @@ const toLine = (l: ConsolResult["leaves"][number]): Leaf => ({
  * `show` selects W&V only, balans only, or both.
  */
 export function ConsolidatedStatementsPage({ show = "both" }: { show?: "both" | "pnl" | "balance" }) {
-  const { workspace, group, entity, dateFrom, dateTo, currency } = useScope();
+  const { workspace, group, entity, dateFrom, dateTo, currency, view } = useScope();
   const [open, setOpen] = useState<Set<string>>(new Set());
   const [openLeaf, setOpenLeaf] = useState<Set<string>>(new Set());
 
+  // The top-bar view drives elimination: gross consolidation, net of
+  // intercompany eliminations, or only the elimination entries.
+  const eliminate = view === "after_eliminations" || view === "eliminations_only";
+
   const { data, isLoading, isError, error } = useQuery({
-    queryKey: ["consolidation", workspace?.id, group?.id, entity?.id, dateFrom, dateTo, currency],
+    queryKey: ["consolidation", workspace?.id, group?.id, entity?.id, dateFrom, dateTo, currency, eliminate],
     queryFn: () =>
-      api<ConsolResult>(`/api/consolidation/summary?from=${dateFrom}&to=${dateTo}&currency=${currency}`),
+      api<ConsolResult>(`/api/consolidation/summary?from=${dateFrom}&to=${dateTo}&currency=${currency}${eliminate ? "&eliminate=1" : ""}`),
     enabled: !!workspace,
   });
 
-  const leaves = useMemo(() => (data?.leaves ?? []).map(toLine), [data]);
-  const pnlCats = useMemo(() => categorize(leaves.filter((l) => l.statement === "PNL"), "pnl"), [leaves]);
-  const balanceCats = useMemo(() => categorize(leaves.filter((l) => l.statement === "BALANCE"), "balance"), [leaves]);
-  const result = -leaves.filter((l) => l.statement === "PNL").reduce((s, l) => s + l.total, 0);
+  // Which leaves to show for the active view.
+  const leaves = useMemo<Leaf[]>(() => {
+    if (!data) return [];
+    const base = data.leaves.map(toLine);
+    const elim = data.eliminations.map(toLine);
+    if (view === "eliminations_only") return elim;
+    if (view === "after_eliminations") return [...base, ...elim];
+    return base;
+  }, [data, view]);
+
+  // Result for the year (net P&L) booked as a separate equity line so the
+  // consolidated balance sheet actually balances. Skipped in eliminations-only.
+  const pnlLeaves = useMemo(() => leaves.filter((l) => l.statement === "PNL"), [leaves]);
+  const result = -pnlLeaves.reduce((s, l) => s + l.total, 0);
+  const balanceLeaves = useMemo<Leaf[]>(() => {
+    const bal = leaves.filter((l) => l.statement === "BALANCE");
+    const pnlSum = pnlLeaves.reduce((s, l) => s + l.total, 0);
+    if (view === "eliminations_only" || Math.abs(pnlSum) < 0.005) return bal;
+    const byEntity = new Map<string, EntityAmount>();
+    for (const l of pnlLeaves)
+      for (const b of l.byEntity) {
+        const cur = byEntity.get(b.entityId) ?? { entityId: b.entityId, entityName: b.entityName, amount: 0 };
+        cur.amount += b.amount;
+        byEntity.set(b.entityId, cur);
+      }
+    const resultLine: Leaf = {
+      glAccountCode: "RESULTAAT",
+      glAccountName: "Resultaat boekjaar",
+      balance: pnlSum,
+      rgsGroupCode: "BEiv",
+      rgsGroupName: "Eigen vermogen",
+      rgsGroupOrder: null,
+      rgsGroupDc: "C",
+      statement: "BALANCE",
+      key: "RESULTAAT",
+      rgsCode: null,
+      unmapped: false,
+      isElimination: false,
+      total: pnlSum,
+      byEntity: [...byEntity.values()],
+    };
+    return [...bal, resultLine];
+  }, [leaves, pnlLeaves, view]);
+
+  const pnlCats = useMemo(() => categorize(pnlLeaves, "pnl"), [pnlLeaves]);
+  const balanceCats = useMemo(() => categorize(balanceLeaves, "balance"), [balanceLeaves]);
 
   const toggle = (set: Set<string>, setter: (s: Set<string>) => void, code: string) => {
     const n = new Set(set);
@@ -214,6 +274,33 @@ export function ConsolidatedStatementsPage({ show = "both" }: { show?: "both" | 
       {workspace && isLoading && <div className="lf-card">Consolidatie laden… (administraties worden parallel opgehaald)</div>}
       {isError && (
         <div className="lf-card text-sm text-red-600">{error instanceof ApiError ? error.message : "Kon consolidatie niet laden"}</div>
+      )}
+
+      {/* Elimination mode + intercompany hints */}
+      {data && eliminate && (
+        <div className="text-xs">
+          <span className={`px-2 py-0.5 rounded ${view === "eliminations_only" ? "bg-rose-50 text-rose-700" : "bg-indigo-50 text-indigo-700"}`}>
+            {view === "eliminations_only" ? "Alleen intercompany-eliminaties" : "Na intercompany-eliminaties"}
+          </span>
+          {!data.intercompanyConfigured && (
+            <span className="ml-2 text-slate-500">
+              — nog geen intercompany-relaties gekoppeld (Consolidatie → Intercompany-matching).
+            </span>
+          )}
+        </div>
+      )}
+
+      {/* Intercompany imbalance warnings */}
+      {data && data.imbalances.length > 0 && (
+        <div className="lf-card bg-rose-50 ring-rose-200 text-rose-900 text-sm space-y-1">
+          <div className="font-medium">Intercompany niet in evenwicht:</div>
+          {data.imbalances.map((im, i) => (
+            <div key={i}>
+              ⚠️ {im.fromEntityName} → {im.toEntityName}: vordering {formatMoney(im.receivable, currency)} vs schuld{" "}
+              {formatMoney(im.payable, currency)} (verschil {formatMoney(im.diff, currency)})
+            </div>
+          ))}
+        </div>
       )}
 
       {data && data.warnings.length > 0 && (

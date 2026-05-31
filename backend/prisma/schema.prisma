@@ -548,3 +548,24 @@ model WorkspaceSettings {
 
   workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
 }
+
+// Intercompany relation map: marks which connector relations (debtor/creditor)
+// inside an administration are actually ANOTHER administration in the workspace,
+// so their mutual balances can be eliminated on consolidation. Stored with plain
+// id fields (validated in the service) to avoid extra back-relations on Entity.
+model IntercompanyRelation {
+  id                   String   @id @default(uuid())
+  workspaceId          String
+  entityId             String // administration where the relation lives
+  relationId           String // connector relation id (ContactSummary.id)
+  relationCode         String?
+  relationName         String?
+  counterpartyEntityId String // which workspace entity this relation IS
+  createdByUserId      String?
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  @@unique([entityId, relationId])
+  @@index([workspaceId])
+  @@index([counterpartyEntityId])
+}

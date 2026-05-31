@@ -24,10 +24,11 @@ interface TbLine {
 
 export function FinancialStatementsPage() {
   const { view } = useScope();
-  // "Geconsolideerd" in the top bar → consolidated jaarrekening across the
-  // group/workspace instead of one administration. Switch at the component
-  // boundary so neither branch ever calls hooks conditionally.
-  if (view === "consolidated") return <ConsolidatedStatementsPage show="both" />;
+  // "Geconsolideerd" / eliminatie-weergaven in de bovenbalk → geconsolideerde
+  // jaarrekening over de groep/werkruimte i.p.v. één administratie. Switch op de
+  // componentgrens zodat geen tak voorwaardelijk hooks aanroept.
+  if (view === "consolidated" || view === "after_eliminations" || view === "eliminations_only")
+    return <ConsolidatedStatementsPage show="both" />;
   return <SingleEntityStatements />;
 }
 
@@ -49,8 +50,28 @@ function SingleEntityStatements() {
   const hasRgs = rows.some((r) => r.rgsGroupCode);
   const useGroups = hasRgs && grouped;
   const pnl = rows.filter((r) => r.accountType === "PROFIT_LOSS");
-  const balance = rows.filter((r) => r.accountType !== "PROFIT_LOSS");
-  const result = -pnl.reduce((s, r) => s + r.balance, 0);
+  const rawBalance = rows.filter((r) => r.accountType !== "PROFIT_LOSS");
+  const pnlSum = pnl.reduce((s, r) => s + r.balance, 0);
+  const result = -pnlSum;
+  // Book the result for the year as a separate equity line so the balance sheet
+  // actually balances (the P&L result isn't appropriated to equity until close).
+  const balance = useMemo<TbLine[]>(() => {
+    if (Math.abs(pnlSum) < 0.005) return rawBalance;
+    const resultLine: TbLine = {
+      glAccountCode: "RESULTAAT",
+      glAccountName: "Resultaat boekjaar",
+      accountType: "BALANCE",
+      debit: 0,
+      credit: 0,
+      balance: pnlSum,
+      currency,
+      rgsGroupCode: "BEiv",
+      rgsGroupName: "Eigen vermogen",
+      rgsGroupOrder: null,
+      rgsGroupDc: "C",
+    };
+    return [...rawBalance, resultLine];
+  }, [rawBalance, pnlSum, currency]);
   const balanceTotal = balance.reduce((s, r) => s + r.balance, 0);
 
   const toggle = (code: string) =>

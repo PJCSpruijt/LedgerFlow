@@ -1,6 +1,8 @@
 import { prisma } from "../config/prisma.js";
 import { tryGetConnectorForEntity } from "../clients/connectors/registry.js";
+import type { Connector } from "../clients/connectors/interfaces/Connector.js";
 import { applyRgsMappings, resolveRgsVersion } from "./rgs-mapping.service.js";
+import { getIntercompanyMap } from "./intercompany.service.js";
 import { convert, prefetchRates } from "./fx.service.js";
 
 /**
@@ -27,6 +29,8 @@ export interface ConsolidationInput {
   to: string;
   /** Reporting currency for all amounts/subtotals. */
   currency: string;
+  /** Also compute intercompany elimination entries + imbalance warnings. */
+  eliminate?: boolean;
 }
 
 export interface ConsolEntityStatus {
@@ -51,10 +55,25 @@ export interface ConsolLeafRow {
   rgsCode: string | null;
   description: string;
   unmapped: boolean;
+  /** True for synthetic intercompany-elimination lines. */
+  isElimination?: boolean;
   /** Consolidated balance (debit − credit) in reporting currency. */
   total: number;
   /** Per-entity contribution to this line, in reporting currency. */
   byEntity: { entityId: string; entityName: string; amount: number }[];
+}
+
+/** A mismatch between two administrations' mutual intercompany balances. */
+export interface ImbalanceWarning {
+  fromEntityId: string;
+  fromEntityName: string;
+  toEntityId: string;
+  toEntityName: string;
+  /** `from`'s receivable on `to`. */
+  receivable: number;
+  /** `to`'s payable to `from`. */
+  payable: number;
+  diff: number;
 }
 
 export interface ConsolidationResult {
@@ -70,6 +89,12 @@ export interface ConsolidationResult {
   includedEntities: { id: string; name: string }[];
   /** Account/leaf-level consolidated lines (RGS-keyed). */
   leaves: ConsolLeafRow[];
+  /** Intercompany elimination lines (empty unless `eliminate` was requested). */
+  eliminations: ConsolLeafRow[];
+  /** Mutual balances that don't reconcile between two administrations. */
+  imbalances: ImbalanceWarning[];
+  /** Whether any intercompany relations are configured for this scope. */
+  intercompanyConfigured: boolean;
   warnings: string[];
 }
 
@@ -115,7 +140,7 @@ export async function consolidate(input: ConsolidationInput): Promise<Consolidat
         const tb = await connector.getTrialBalance({ from, to });
         const lines = await applyRgsMappings(tb, workspaceId, ent.id);
         status.push({ entityId: ent.id, entityName: ent.name, groupId: ent.groupId, included: true });
-        return { ent, lines };
+        return { ent, lines, connector };
       } catch (e) {
         status.push({
           entityId: ent.id,
@@ -195,6 +220,24 @@ export async function consolidate(input: ConsolidationInput): Promise<Consolidat
     warnings.push("Geen enkele administratie in deze scope kon worden geladen.");
   }
 
+  // Intercompany elimination (optional): net out mutual receivables/payables.
+  const entityIds = loaded.map((e) => e.ent.id);
+  const icMap = await getIntercompanyMap(entityIds);
+  const intercompanyConfigured = [...icMap.values()].some((m) => m.size > 0);
+  let eliminations: ConsolLeafRow[] = [];
+  let imbalances: ImbalanceWarning[] = [];
+  if (input.eliminate && intercompanyConfigured) {
+    const elim = await computeEliminations(
+      loaded.map((e) => ({ id: e.ent.id, name: e.ent.name, connector: e.connector })),
+      icMap,
+      currency,
+      rgsVersion,
+      warnings,
+    );
+    eliminations = elim.eliminations;
+    imbalances = elim.imbalances;
+  }
+
   return {
     from,
     to,
@@ -206,6 +249,136 @@ export async function consolidate(input: ConsolidationInput): Promise<Consolidat
     entities: status.sort((a, b) => a.entityName.localeCompare(b.entityName)),
     includedEntities: loaded.map((e) => ({ id: e.ent.id, name: e.ent.name })),
     leaves: [...byKey.values()],
+    eliminations,
+    imbalances,
+    intercompanyConfigured,
     warnings: [...new Set(warnings)],
   };
+}
+
+/**
+ * Build intercompany elimination lines + imbalance warnings from each entity's
+ * open receivables/payables per relation. A relation mapped to a counterparty
+ * entity is intercompany: its open receivable in A should equal the open payable
+ * in B. Eliminations remove both legs; a mismatch is flagged as an imbalance.
+ */
+async function computeEliminations(
+  entities: { id: string; name: string; connector: Connector }[],
+  icMap: Map<string, Map<string, string>>,
+  currency: string,
+  rgsVersion: string,
+  warnings: string[],
+): Promise<{ eliminations: ConsolLeafRow[]; imbalances: ImbalanceWarning[] }> {
+  const nameById = new Map(entities.map((e) => [e.id, e.name]));
+  // recv[a][b] = a's open receivable attributed to counterparty b. pay[a][b] = a's payable to b.
+  const recv = new Map<string, Map<string, number>>();
+  const pay = new Map<string, Map<string, number>>();
+  const bump = (m: Map<string, Map<string, number>>, a: string, b: string, v: number) => {
+    const inner = m.get(a) ?? new Map<string, number>();
+    inner.set(b, (inner.get(b) ?? 0) + v);
+    m.set(a, inner);
+  };
+
+  for (const e of entities) {
+    const mapped = icMap.get(e.id);
+    if (!mapped || mapped.size === 0) continue;
+    try {
+      const [deb, cre] = await Promise.all([e.connector.getOutstanding("debtor"), e.connector.getOutstanding("creditor")]);
+      for (const it of deb) {
+        const cp = mapped.get(it.relationId);
+        if (cp) bump(recv, e.id, cp, it.openAmount);
+      }
+      for (const it of cre) {
+        const cp = mapped.get(it.relationId);
+        if (cp) bump(pay, e.id, cp, it.openAmount);
+      }
+    } catch (err) {
+      warnings.push(`${e.name}: openstaande posten voor eliminatie konden niet worden opgehaald (${err instanceof Error ? err.message : "fout"}).`);
+    }
+  }
+
+  // RGS hoofdrubriek metadata for the elimination buckets.
+  const rgs = await prisma.rgsAccount.findMany({
+    where: { version: rgsVersion, code: { in: ["BVor", "BSch"] } },
+    select: { code: true, description: true, referentienummer: true, dc: true },
+  });
+  const meta = new Map(rgs.map((r) => [r.code, r]));
+  const vorName = meta.get("BVor")?.description ?? "Vorderingen";
+  const schName = meta.get("BSch")?.description ?? "Kortlopende schulden";
+
+  // Aggregate elimination amounts per entity for the two buckets.
+  const recvByEntity: { entityId: string; entityName: string; amount: number }[] = [];
+  const payByEntity: { entityId: string; entityName: string; amount: number }[] = [];
+  let recvTotal = 0;
+  let payTotal = 0;
+  for (const [a, inner] of recv) {
+    const amt = [...inner.values()].reduce((s, v) => s + v, 0);
+    if (Math.abs(amt) < 0.005) continue;
+    recvByEntity.push({ entityId: a, entityName: nameById.get(a) ?? a, amount: -amt }); // remove the receivable (debit) → negative
+    recvTotal += -amt;
+  }
+  for (const [a, inner] of pay) {
+    const amt = [...inner.values()].reduce((s, v) => s + v, 0);
+    if (Math.abs(amt) < 0.005) continue;
+    payByEntity.push({ entityId: a, entityName: nameById.get(a) ?? a, amount: amt }); // remove the payable (credit) → positive
+    payTotal += amt;
+  }
+
+  const eliminations: ConsolLeafRow[] = [];
+  if (recvByEntity.length) {
+    eliminations.push({
+      statement: "BALANCE",
+      rgsGroupCode: "BVor",
+      rgsGroupName: vorName,
+      rgsGroupDc: meta.get("BVor")?.dc ?? "D",
+      rgsGroupOrder: meta.get("BVor")?.referentienummer ?? null,
+      key: "ELIM:RECV",
+      rgsCode: null,
+      description: "Eliminatie intercompany-vorderingen",
+      unmapped: false,
+      isElimination: true,
+      total: recvTotal,
+      byEntity: recvByEntity,
+    });
+  }
+  if (payByEntity.length) {
+    eliminations.push({
+      statement: "BALANCE",
+      rgsGroupCode: "BSch",
+      rgsGroupName: schName,
+      rgsGroupDc: meta.get("BSch")?.dc ?? "C",
+      rgsGroupOrder: meta.get("BSch")?.referentienummer ?? null,
+      key: "ELIM:PAY",
+      rgsCode: null,
+      description: "Eliminatie intercompany-schulden",
+      unmapped: false,
+      isElimination: true,
+      total: payTotal,
+      byEntity: payByEntity,
+    });
+  }
+
+  // Imbalance check per ordered pair: a's receivable on b vs b's payable to a.
+  const imbalances: ImbalanceWarning[] = [];
+  for (const a of entities) {
+    for (const b of entities) {
+      if (a.id === b.id) continue;
+      const r = recv.get(a.id)?.get(b.id) ?? 0;
+      const p = pay.get(b.id)?.get(a.id) ?? 0;
+      if (Math.abs(r) < 0.005 && Math.abs(p) < 0.005) continue;
+      const diff = r - p;
+      if (Math.abs(diff) > 0.01) {
+        imbalances.push({
+          fromEntityId: a.id,
+          fromEntityName: a.name,
+          toEntityId: b.id,
+          toEntityName: b.name,
+          receivable: r,
+          payable: p,
+          diff,
+        });
+      }
+    }
+  }
+  return { eliminations, imbalances };
 }
