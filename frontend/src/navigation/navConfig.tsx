@@ -17,6 +17,7 @@ import { FinancialStatementsPage } from "../pages/FinancialStatementsPage";
 import { ConsolidatedStatementsPage } from "../pages/ConsolidatedStatementsPage";
 import { ConsolidatedTrialBalancePage } from "../pages/ConsolidatedTrialBalancePage";
 import { IntercompanyMatchingPage } from "../pages/IntercompanyMatchingPage";
+import { IntercompanyReconciliationPage } from "../pages/IntercompanyReconciliationPage";
 import { ConsolidationRunsPage } from "../pages/ConsolidationRunsPage";
 import { ConsolidationAdjustmentsPage } from "../pages/ConsolidationAdjustmentsPage";
 import { BillingPage } from "../pages/BillingPage";
@@ -120,6 +121,7 @@ export const MODULES: ModuleDef[] = [
       { path: "balance-sheet", label: "Geconsolideerde balans", element: <ConsolidatedStatementsPage show="balance" /> },
       { path: "runs", label: "Consolidatieruns", element: <ConsolidationRunsPage /> },
       { path: "intercompany", label: "Intercompany-matching", element: <IntercompanyMatchingPage /> },
+      { path: "reconciliation", label: "Reconciliatie & mismatches", element: <IntercompanyReconciliationPage /> },
       { path: "elimination-rules", label: "Eliminatieregels", element: soon("Eliminatieregels") },
       { path: "elimination-entries", label: "Eliminatieboekingen", element: soon("Eliminatieboekingen") },
       { path: "adjustments", label: "Consolidatiecorrecties", element: <ConsolidationAdjustmentsPage /> },

@@ -13,6 +13,7 @@ import {
   deleteConsolidationRun,
 } from "../services/consolidation-run.service.js";
 import { listAdjustments, createAdjustment, deleteAdjustment } from "../services/consolidation-adjustment.service.js";
+import { reconcileIntercompany } from "../services/intercompany-reconciliation.service.js";
 import { NotFoundError } from "../utils/errors.js";
 import { validateParams } from "../middleware/validate.js";
 
@@ -91,6 +92,33 @@ consolidationRouter.post(
       userId: req.user?.id ?? null,
     });
     res.json({ ok: true });
+  }),
+);
+
+// ---- Intercompany reconciliation (typed mismatch report) ------------------
+
+const ReconQuery = z.object({
+  from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  currency: z.string().length(3).optional(),
+  scope: z.enum(["group", "workspace"]).optional(),
+});
+
+consolidationRouter.get(
+  "/reconciliation",
+  validateQuery(ReconQuery),
+  asyncHandler(async (req, res) => {
+    const q = req.query as unknown as z.infer<typeof ReconQuery>;
+    const groupId = q.scope === "workspace" ? null : req.scope!.groupId ?? null;
+    res.json(
+      await reconcileIntercompany({
+        workspaceId: req.scope!.workspaceId,
+        groupId,
+        from: q.from,
+        to: q.to,
+        currency: (q.currency ?? "EUR").toUpperCase(),
+      }),
+    );
   }),
 );
 
