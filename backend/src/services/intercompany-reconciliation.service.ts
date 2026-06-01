@@ -2,7 +2,7 @@ import { prisma } from "../config/prisma.js";
 import { tryGetConnectorForEntity } from "../clients/connectors/registry.js";
 import { applyRgsMappings } from "./rgs-mapping.service.js";
 import { getIntercompanyRelations, normName } from "./intercompany.service.js";
-import { cachedTrialBalance, cachedTransactions } from "./connector-cache.service.js";
+import { cachedTrialBalance, cachedTransactions, cachedOutstanding } from "./connector-cache.service.js";
 import { convert, prefetchRates } from "./fx.service.js";
 
 /**
@@ -23,17 +23,24 @@ import { convert, prefetchRates } from "./fx.service.js";
  * intercompany-tagged transaction flow in the period (relation-based).
  */
 
-export type ReconCategory = "EQUITY_INVESTMENT" | "CURRENT_ACCOUNT" | "LOAN" | "RECEIVABLE_PAYABLE" | "REVENUE_COST";
+export type ReconCategory =
+  | "EQUITY_INVESTMENT"
+  | "CURRENT_ACCOUNT"
+  | "LOAN"
+  | "RECEIVABLE_PAYABLE"
+  | "TAX_FISCAL_UNITY"
+  | "REVENUE_COST";
 
 export const CATEGORY_LABEL: Record<ReconCategory, string> = {
   EQUITY_INVESTMENT: "Deelneming ↔ eigen vermogen",
   CURRENT_ACCOUNT: "Rekening-courant",
   LOAN: "Leningen",
   RECEIVABLE_PAYABLE: "Debiteuren ↔ crediteuren",
+  TAX_FISCAL_UNITY: "Belasting / fiscale eenheid (btw)",
   REVENUE_COST: "Omzet ↔ kosten",
 };
 
-type Side = "INVESTMENT" | "EQUITY" | "RC" | "LOAN" | "RECEIVABLE" | "PAYABLE" | "REVENUE" | "COST";
+type Side = "INVESTMENT" | "EQUITY" | "RC" | "LOAN" | "RECEIVABLE" | "PAYABLE" | "TAX" | "REVENUE" | "COST";
 
 interface Classified {
   category: ReconCategory;
@@ -57,10 +64,12 @@ function classify(name: string, rgsCode: string | null, rgsGroupCode: string | n
       return { category: "EQUITY_INVESTMENT", side: "INVESTMENT", basis: "balance" };
     if (grp === "BEiv" || /aandelenkapitaal|agio|reserve|onverdeeld resultaat|resultaat (lopend|boekjaar|voorgaande)|eigen vermogen|kapitaal/.test(n))
       return { category: "EQUITY_INVESTMENT", side: "EQUITY", basis: "balance" };
-    if (grp === "BVor" || rgs.startsWith("BVorDeb") || /debiteuren/.test(n))
-      return { category: "RECEIVABLE_PAYABLE", side: "RECEIVABLE", basis: "flow" };
-    if (grp === "BSch" || rgs.startsWith("BSchCre") || /crediteuren/.test(n))
-      return { category: "RECEIVABLE_PAYABLE", side: "PAYABLE", basis: "flow" };
+    // Btw / fiscale eenheid is een intercompany-afrekening (geen handelspost) → eigen categorie.
+    if (/fiscale eenheid/.test(n) || rgs.startsWith("BSchBepBtw") || rgs.startsWith("BVorVbk"))
+      return { category: "TAX_FISCAL_UNITY", side: "TAX", basis: "flow" };
+    // Handelsdebiteuren/-crediteuren komen NIET hier vandaan maar uit de openstaande
+    // posten (zie open-items-pass) — een hele BVor/BSch-hoofdrubriek (incl. btw,
+    // overlopend) als debiteur/crediteur bestempelen was onjuist.
     return null;
   }
   // Profit & loss
@@ -136,6 +145,10 @@ const WARNING: Record<ReconCategory, { mismatch: string; oneSided: (who: string)
     mismatch: "Debiteuren en crediteuren sluiten onderling niet",
     oneSided: (who) => `Facturen niet geboekt bij ${who}`,
   },
+  TAX_FISCAL_UNITY: {
+    mismatch: "Btw/fiscale-eenheid-afrekening sluit onderling niet",
+    oneSided: (who) => `Btw fiscale eenheid niet geboekt bij ${who}`,
+  },
   REVENUE_COST: {
     mismatch: "Omzet en kosten sluiten onderling niet",
     oneSided: (who) => `Facturen niet geboekt bij ${who}`,
@@ -174,15 +187,19 @@ export async function reconcileIntercompany(input: {
       status.push({ id: ent.id, name: ent.name, included: false, reason: "Geen koppeling" });
       continue;
     }
-    let tb, txns;
+    let tb, txns, debOpen, creOpen;
     try {
-      const [tbRes, txRes] = await Promise.all([
+      const [tbRes, txRes, debRes, creRes] = await Promise.all([
         cachedTrialBalance(ent.id, { from, to }, force),
         cachedTransactions(ent.id, { from, to }, force),
+        cachedOutstanding(ent.id, "debtor", force),
+        cachedOutstanding(ent.id, "creditor", force),
       ]);
       tb = await applyRgsMappings(tbRes.data, workspaceId, ent.id);
       txns = await applyRgsMappings(txRes.data, workspaceId, ent.id);
-      for (const r of [tbRes, txRes]) if (!lastFetchedAt || r.fetchedAt > lastFetchedAt) lastFetchedAt = r.fetchedAt;
+      debOpen = debRes.data;
+      creOpen = creRes.data;
+      for (const r of [tbRes, txRes, debRes, creRes]) if (!lastFetchedAt || r.fetchedAt > lastFetchedAt) lastFetchedAt = r.fetchedAt;
     } catch (e) {
       status.push({ id: ent.id, name: ent.name, included: false, reason: e instanceof Error ? e.message : "Ophalen mislukt" });
       continue;
@@ -259,6 +276,44 @@ export async function reconcileIntercompany(input: {
     for (const { p, amount } of flow.values()) {
       if (Math.abs(amount) < 0.005) continue;
       positions.push({ ...p, amount });
+    }
+
+    // Trade debtors/creditors from OPEN ITEMS per relation (not transaction flow):
+    // an open intercompany invoice should mirror an open creditor at the
+    // counterparty. Only items whose relation matches a group administration count
+    // (external customers/suppliers are skipped). Receivable +, payable −, so a
+    // booked pair nets to ~0 and an unbooked side reads as a one-sided mismatch.
+    const cpByRelation = (relName: string | null): string | null => {
+      if (!relName) return null;
+      const rn = normName(relName);
+      const m = candIds.find((c) => c.id !== ent.id && c.n && (rn === c.n || rn.includes(c.n) || c.n.includes(rn)));
+      return m?.id ?? null;
+    };
+    const ar = new Map<string, number>(); // counterparty → open receivable
+    const ap = new Map<string, number>(); // counterparty → open payable
+    for (const it of debOpen ?? []) {
+      const cp = cpByRelation(it.relationName);
+      if (cp) ar.set(cp, (ar.get(cp) ?? 0) + it.openAmount);
+    }
+    for (const it of creOpen ?? []) {
+      const cp = cpByRelation(it.relationName);
+      if (cp) ap.set(cp, (ap.get(cp) ?? 0) + it.openAmount);
+    }
+    for (const [cp, amt] of ar) {
+      if (Math.abs(amt) < 0.005) continue;
+      positions.push({
+        entityId: ent.id, entityName: ent.name, category: "RECEIVABLE_PAYABLE", side: "RECEIVABLE",
+        counterpartyId: cp, accountCode: "—", accountName: `Openstaande debiteuren — ${nameById.get(cp) ?? ""}`.trim(),
+        rgsCode: null, amount: amt,
+      });
+    }
+    for (const [cp, amt] of ap) {
+      if (Math.abs(amt) < 0.005) continue;
+      positions.push({
+        entityId: ent.id, entityName: ent.name, category: "RECEIVABLE_PAYABLE", side: "PAYABLE",
+        counterpartyId: cp, accountCode: "—", accountName: `Openstaande crediteuren — ${nameById.get(cp) ?? ""}`.trim(),
+        rgsCode: null, amount: -amt,
+      });
     }
   }
 

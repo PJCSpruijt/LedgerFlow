@@ -6,7 +6,7 @@ import { formatMoney } from "../lib/period";
 import { ExportButtons } from "../components/ExportButtons";
 import { CacheBar } from "../components/CacheBar";
 
-type Category = "EQUITY_INVESTMENT" | "CURRENT_ACCOUNT" | "LOAN" | "RECEIVABLE_PAYABLE" | "REVENUE_COST";
+type Category = "EQUITY_INVESTMENT" | "CURRENT_ACCOUNT" | "LOAN" | "RECEIVABLE_PAYABLE" | "TAX_FISCAL_UNITY" | "REVENUE_COST";
 interface PairResult {
   category: Category;
   categoryLabel: string;
@@ -41,7 +41,7 @@ interface ReconResult {
   warnings: string[];
 }
 
-const CATEGORY_ORDER: Category[] = ["EQUITY_INVESTMENT", "CURRENT_ACCOUNT", "LOAN", "RECEIVABLE_PAYABLE", "REVENUE_COST"];
+const CATEGORY_ORDER: Category[] = ["EQUITY_INVESTMENT", "CURRENT_ACCOUNT", "LOAN", "RECEIVABLE_PAYABLE", "TAX_FISCAL_UNITY", "REVENUE_COST"];
 
 function StatusBadge({ status }: { status: PairResult["status"] }) {
   const map = {
