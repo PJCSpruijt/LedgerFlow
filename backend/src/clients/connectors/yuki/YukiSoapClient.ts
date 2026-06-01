@@ -148,13 +148,30 @@ export class YukiSoapClient {
     });
 
     if (statusCode >= 400) {
+      // Yuki returns its daily-limit and other faults as HTTP 500 with a SOAP
+      // Fault body, so extract the human reason and surface a clear message
+      // instead of a bare "HTTP 500".
+      let reason: string | null = null;
+      try {
+        const p = xmlParser.parse(text) as any;
+        reason = p?.Envelope?.Body?.Fault?.Reason?.Text ?? p?.Envelope?.Body?.Fault?.faultstring ?? null;
+      } catch {
+        /* keep reason null on unparseable body */
+      }
       logger.warn(
-        { service: opts.service, method: opts.method, statusCode, snippet: text.slice(0, 1000) },
+        { service: opts.service, method: opts.method, statusCode, reason, snippet: text.slice(0, 1000) },
         "Yuki SOAP error response",
       );
+      const lower = (reason ?? "").toLowerCase();
+      if (/daily limit|limit exceeded|rate.?limit|too many requests|quota/.test(lower)) {
+        throw new ConnectorError(
+          "Daglimiet van de Yuki-koppeling overschreden. De data kan tijdelijk niet worden opgehaald; de limiet reset dagelijks.",
+          { statusCode, reason, rateLimited: true, connector: "yuki" },
+        );
+      }
       throw new ConnectorError(
-        `Yuki ${opts.service}.${opts.method} returned HTTP ${statusCode}`,
-        { statusCode, snippet: text.slice(0, 1000) },
+        reason ? `Yuki ${opts.service}.${opts.method}: ${reason}` : `Yuki ${opts.service}.${opts.method} returned HTTP ${statusCode}`,
+        { statusCode, reason, snippet: text.slice(0, 1000) },
       );
     }
 
