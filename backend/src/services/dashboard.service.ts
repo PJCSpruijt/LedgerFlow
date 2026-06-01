@@ -166,6 +166,11 @@ export async function computeDashboardKpis(input: DashboardInput): Promise<Dashb
       for (const r of rels) if (r.relationName) nameToCp.set(normName(r.relationName), r.counterpartyEntityId);
       const icRelIds = icMap.get(ent.id) ?? new Map<string, string>();
 
+      // The administration's functional currency (open items carry no currency
+      // of their own; the trial balance lines do). Used to convert outstanding
+      // debtors/creditors to the reporting currency, just like the balances.
+      const entityCurrency = (tb.find((l) => l.currency)?.currency || "EUR").toUpperCase();
+
       // --- Working-capital balances + per-account intercompany flow ----------
       const balByAcct = new Map<string, { balance: number; rgsCode: string | null; group: string }>();
       for (const l of tb) {
@@ -225,13 +230,19 @@ export async function computeDashboardKpis(input: DashboardInput): Promise<Dashb
       }
 
       // --- Outstanding debtors / creditors (open items, IC by relation) ------
+      // Open amounts are in the administration's functional currency → convert
+      // to the reporting currency at period end (consistent with the balances).
+      const toReporting = async (amount: number) =>
+        (await convert(amount, entityCurrency, currency, to)) ?? amount;
       for (const it of deb) {
-        debGross += it.openAmount;
-        if (icRelIds.has(it.relationId)) debIC += it.openAmount;
+        const amt = await toReporting(it.openAmount);
+        debGross += amt;
+        if (icRelIds.has(it.relationId)) debIC += amt;
       }
       for (const it of cre) {
-        creGross += it.openAmount;
-        if (icRelIds.has(it.relationId)) creIC += it.openAmount;
+        const amt = await toReporting(it.openAmount);
+        creGross += amt;
+        if (icRelIds.has(it.relationId)) creIC += amt;
       }
     }),
   );
