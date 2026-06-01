@@ -1,3 +1,4 @@
+import { useRef } from "react";
 import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { useScope } from "../contexts/ScopeContext";
@@ -5,6 +6,7 @@ import { useAuth } from "../contexts/AuthContext";
 import { api } from "../services/api";
 import { formatMoney } from "../lib/period";
 import { isWidgetEnabled } from "../lib/dashboardWidgets";
+import { CacheBar } from "../components/CacheBar";
 
 interface Subscription {
   plan: string | null;
@@ -45,6 +47,7 @@ interface Kpis {
   outstandingDebtors: { gross: number; intercompany: number; net: number };
   outstandingCreditors: { gross: number; intercompany: number; net: number };
   intercompanyConfigured: boolean;
+  cachedAt: string | null;
   warnings: string[];
 }
 
@@ -182,11 +185,20 @@ export function DashboardPage() {
   });
   const sub = subResp?.subscription ?? null;
 
-  const { data: kpis, isLoading: kpisLoading } = useQuery({
+  const forceRef = useRef(false);
+  const { data: kpis, isLoading: kpisLoading, isFetching: kpisFetching, refetch: refetchKpis } = useQuery({
     queryKey: ["dashboard-kpis", workspace?.id, group?.id, entity?.id, dateFrom, dateTo, currency],
-    queryFn: () => api<Kpis>(`/api/dashboard/kpis?from=${dateFrom}&to=${dateTo}&currency=${currency}`),
+    queryFn: () => {
+      const f = forceRef.current;
+      forceRef.current = false;
+      return api<Kpis>(`/api/dashboard/kpis?from=${dateFrom}&to=${dateTo}&currency=${currency}${f ? "&refresh=1" : ""}`);
+    },
     enabled: !!workspace,
   });
+  const refreshKpis = () => {
+    forceRef.current = true;
+    refetchKpis();
+  };
 
   const { data: connResp } = useQuery({
     queryKey: ["connection", entity?.id],
@@ -217,12 +229,15 @@ export function DashboardPage() {
             <>
               <div className="flex items-center justify-between flex-wrap gap-2">
                 <h2 className="text-lg font-semibold">Kerncijfers</h2>
-                <div className="text-xs text-slate-400">
-                  {dateFrom} t/m {dateTo} · {kpis.currency}
-                  {kpis.entities.filter((e) => e.included).length > 1 &&
-                    ` · geconsolideerd (${kpis.entities.filter((e) => e.included).length} administraties${
-                      kpis.intercompanyConfigured ? ", na intercompany-eliminatie" : ""
-                    })`}
+                <div className="flex items-center gap-3 flex-wrap">
+                  <div className="text-xs text-slate-400">
+                    {dateFrom} t/m {dateTo} · {kpis.currency}
+                    {kpis.entities.filter((e) => e.included).length > 1 &&
+                      ` · geconsolideerd (${kpis.entities.filter((e) => e.included).length} administraties${
+                        kpis.intercompanyConfigured ? ", na intercompany-eliminatie" : ""
+                      })`}
+                  </div>
+                  <CacheBar cachedAt={kpis.cachedAt} refreshing={kpisFetching} onRefresh={refreshKpis} />
                 </div>
               </div>
 

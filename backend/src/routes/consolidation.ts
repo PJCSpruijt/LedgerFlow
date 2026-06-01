@@ -36,6 +36,8 @@ const SummaryQuery = z.object({
   scope: z.enum(["group", "workspace"]).optional(),
   /** "1" also computes intercompany eliminations + imbalance warnings. */
   eliminate: z.enum(["0", "1"]).optional(),
+  /** "1" bypasses the connector day-cache and re-fetches live. */
+  refresh: z.string().optional(),
 });
 
 consolidationRouter.get(
@@ -52,6 +54,7 @@ consolidationRouter.get(
       to: q.to,
       currency: (q.currency ?? "EUR").toUpperCase(),
       eliminate: q.eliminate === "1",
+      refresh: q.refresh === "1",
     });
     res.json(result);
   }),
@@ -102,6 +105,7 @@ const ReconQuery = z.object({
   to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   currency: z.string().length(3).optional(),
   scope: z.enum(["group", "workspace"]).optional(),
+  refresh: z.string().optional(),
 });
 
 consolidationRouter.get(
@@ -117,6 +121,7 @@ consolidationRouter.get(
         from: q.from,
         to: q.to,
         currency: (q.currency ?? "EUR").toUpperCase(),
+        refresh: q.refresh === "1",
       }),
     );
   }),

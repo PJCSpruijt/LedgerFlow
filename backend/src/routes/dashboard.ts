@@ -20,6 +20,7 @@ const KpiQuery = z.object({
   to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "to must be yyyy-MM-dd"),
   currency: z.string().length(3).optional(),
   scope: z.enum(["group", "workspace"]).optional(),
+  refresh: z.string().optional(),
 });
 
 dashboardRouter.get(
@@ -35,6 +36,7 @@ dashboardRouter.get(
       from: q.from,
       to: q.to,
       currency: (q.currency ?? "EUR").toUpperCase(),
+      refresh: q.refresh === "1",
     });
     res.json(kpis);
   }),

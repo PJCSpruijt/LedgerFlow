@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useScope } from "../contexts/ScopeContext";
@@ -6,6 +6,7 @@ import { api, ApiError } from "../services/api";
 import { formatMoney } from "../lib/period";
 import { usePdfModal } from "../components/PdfModal";
 import { ExportButtons } from "../components/ExportButtons";
+import { CacheBar } from "../components/CacheBar";
 
 interface Tx {
   date: string;
@@ -190,12 +191,22 @@ export function TransactionsPage() {
   const codeFilter = sp.get("code");
   const relationFilter = sp.get("relation");
 
-  const { data, isLoading, isError, error } = useQuery({
+  const forceRef = useRef(false);
+  const { data, isLoading, isError, error, isFetching, refetch } = useQuery({
     queryKey: ["transactions", entity?.id, dateFrom, dateTo, currency],
-    queryFn: () =>
-      api<{ rows: Tx[] }>(`/api/yuki/transactions?from=${dateFrom}&to=${dateTo}&currency=${currency}`),
+    queryFn: () => {
+      const f = forceRef.current;
+      forceRef.current = false;
+      return api<{ rows: Tx[]; cachedAt?: string | null }>(
+        `/api/yuki/transactions?from=${dateFrom}&to=${dateTo}&currency=${currency}${f ? "&refresh=1" : ""}`,
+      );
+    },
     enabled: !!entity,
   });
+  const refresh = () => {
+    forceRef.current = true;
+    refetch();
+  };
 
   // When arriving from General Ledger with a ?code= filter, open that group.
   useEffect(() => {
@@ -342,6 +353,7 @@ export function TransactionsPage() {
           <p className="text-sm text-slate-500 mt-1">
             {entity ? `${entity.name} · ${dateFrom} t/m ${dateTo}` : "Selecteer een administratie"}
           </p>
+          {entity && <div className="mt-1"><CacheBar cachedAt={data?.cachedAt} refreshing={isFetching} onRefresh={refresh} /></div>}
         </div>
         {data && (
           <div className="flex gap-3 text-xs items-center">

@@ -1,9 +1,10 @@
-import { Fragment, useMemo, useState } from "react";
+import { Fragment, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useScope } from "../contexts/ScopeContext";
 import { api, ApiError } from "../services/api";
 import { formatMoney } from "../lib/period";
 import { ExportButtons } from "../components/ExportButtons";
+import { CacheBar } from "../components/CacheBar";
 
 interface EntityAmount {
   entityId: string;
@@ -43,6 +44,7 @@ interface ConsolResult {
   adjustments?: Leaf[];
   imbalances: Imbalance[];
   intercompanyConfigured: boolean;
+  cachedAt?: string | null;
   warnings: string[];
 }
 
@@ -78,12 +80,22 @@ export function ConsolidatedTrialBalancePage() {
       return n;
     });
 
-  const { data, isLoading, isError, error } = useQuery({
+  const forceRef = useRef(false);
+  const { data, isLoading, isError, error, isFetching, refetch } = useQuery({
     queryKey: ["consolidation", workspace?.id, group?.id, entity?.id, dateFrom, dateTo, currency, true],
-    queryFn: () =>
-      api<ConsolResult>(`/api/consolidation/summary?from=${dateFrom}&to=${dateTo}&currency=${currency}&eliminate=1`),
+    queryFn: () => {
+      const f = forceRef.current;
+      forceRef.current = false;
+      return api<ConsolResult>(
+        `/api/consolidation/summary?from=${dateFrom}&to=${dateTo}&currency=${currency}&eliminate=1${f ? "&refresh=1" : ""}`,
+      );
+    },
     enabled: !!workspace,
   });
+  const refresh = () => {
+    forceRef.current = true;
+    refetch();
+  };
 
   const cols = data?.includedEntities ?? [];
   const showEntityCols = !collapsed && cols.length > 0;
@@ -137,6 +149,7 @@ export function ConsolidatedTrialBalancePage() {
           </p>
         </div>
         <div className="flex items-center gap-3 no-print">
+          {data && <CacheBar cachedAt={data.cachedAt} refreshing={isFetching} onRefresh={refresh} />}
           {data && blocks.length > 0 && (
             <button
               className="lf-link text-xs"

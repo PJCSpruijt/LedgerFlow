@@ -1,9 +1,10 @@
-import { Fragment, useMemo, useState } from "react";
+import { Fragment, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useScope } from "../contexts/ScopeContext";
 import { api, ApiError } from "../services/api";
 import { formatMoney } from "../lib/period";
 import { ExportButtons } from "../components/ExportButtons";
+import { CacheBar } from "../components/CacheBar";
 import { categorize, display, type Cat, type StmtLine } from "../lib/rgsPresentation";
 
 interface EntityAmount {
@@ -56,6 +57,7 @@ export interface ConsolResult {
   adjustments?: RawLeaf[];
   imbalances: Imbalance[];
   intercompanyConfigured: boolean;
+  cachedAt?: string | null;
   warnings: string[];
 }
 
@@ -99,12 +101,22 @@ export function ConsolidatedStatementsPage({
   // intercompany eliminations, or only the elimination entries.
   const eliminate = view === "after_eliminations" || view === "eliminations_only";
 
-  const { data: fetched, isLoading: fetching, isError, error } = useQuery({
+  const forceRef = useRef(false);
+  const { data: fetched, isLoading: fetching, isError, error, isFetching, refetch } = useQuery({
     queryKey: ["consolidation", workspace?.id, group?.id, entity?.id, dateFrom, dateTo, scopeCurrency, eliminate],
-    queryFn: () =>
-      api<ConsolResult>(`/api/consolidation/summary?from=${dateFrom}&to=${dateTo}&currency=${scopeCurrency}${eliminate ? "&eliminate=1" : ""}`),
+    queryFn: () => {
+      const f = forceRef.current;
+      forceRef.current = false;
+      return api<ConsolResult>(
+        `/api/consolidation/summary?from=${dateFrom}&to=${dateTo}&currency=${scopeCurrency}${eliminate ? "&eliminate=1" : ""}${f ? "&refresh=1" : ""}`,
+      );
+    },
     enabled: !snapshot && !!workspace,
   });
+  const refresh = () => {
+    forceRef.current = true;
+    refetch();
+  };
 
   const data = snapshot ?? fetched;
   const isLoading = !snapshot && fetching;
@@ -257,6 +269,7 @@ export function ConsolidatedStatementsPage({
           <p className="text-sm text-slate-500 mt-1">
             {scopeLabel} · {periodFrom} t/m {periodTo} · {currency}
           </p>
+          {!snapshot && data && <div className="mt-1"><CacheBar cachedAt={data.cachedAt} refreshing={isFetching} onRefresh={refresh} /></div>}
         </div>
         {data && (
           <ExportButtons

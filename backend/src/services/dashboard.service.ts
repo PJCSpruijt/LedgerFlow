@@ -2,6 +2,7 @@ import { prisma } from "../config/prisma.js";
 import { tryGetConnectorForEntity } from "../clients/connectors/registry.js";
 import { applyRgsMappings } from "./rgs-mapping.service.js";
 import { applyVatMappings, requiredVatCodes } from "./vat-mapping.service.js";
+import { cachedTrialBalance, cachedTransactions, cachedOutstanding } from "./connector-cache.service.js";
 import { getIntercompanyRelations, getIntercompanyMap, normName } from "./intercompany.service.js";
 import { isIntragroupCode } from "./consolidation.service.js";
 import { convert, prefetchRates } from "./fx.service.js";
@@ -49,6 +50,8 @@ export interface DashboardKpis {
   outstandingDebtors: { gross: number; intercompany: number; net: number };
   outstandingCreditors: { gross: number; intercompany: number; net: number };
   intercompanyConfigured: boolean;
+  /** When the underlying connector data was last fetched (ISO), or null. */
+  cachedAt: string | null;
   warnings: string[];
 }
 
@@ -58,6 +61,8 @@ export interface DashboardInput {
   from: string;
   to: string;
   currency: string;
+  /** Bypass the connector day-cache and re-fetch live. */
+  refresh?: boolean;
 }
 
 const REV_NAME = /omzet|opbrengst|revenue|sales|turnover/i;
@@ -106,6 +111,8 @@ export async function computeDashboardKpis(input: DashboardInput): Promise<Dashb
   let unmappedBalance = false;
   let unmappedRgsAccounts = 0;
   let unmappedVatCodes = 0;
+  const fetched: { at: Date | null } = { at: null };
+  const force = input.refresh ?? false;
   const rgsEnabledSettings = await prisma.workspaceSettings.findUnique({ where: { workspaceId }, select: { rgsEnabled: true } });
   const rgsEnabled = rgsEnabledSettings?.rgsEnabled ?? false;
   const inPeriod = (d: string) => d >= from && d <= to;
@@ -121,12 +128,17 @@ export async function computeDashboardKpis(input: DashboardInput): Promise<Dashb
       }
       let tb, txns, deb, cre;
       try {
-        [tb, txns, deb, cre] = await Promise.all([
-          connector.getTrialBalance({ from, to }).then((r) => applyRgsMappings(r, workspaceId, ent.id)),
-          connector.getTransactions({ from: txFrom, to: txTo }).then((r) => applyRgsMappings(r, workspaceId, ent.id)),
-          connector.getOutstanding("debtor"),
-          connector.getOutstanding("creditor"),
+        const [tbRes, txRes, debRes, creRes] = await Promise.all([
+          cachedTrialBalance(ent.id, { from, to }, force),
+          cachedTransactions(ent.id, { from: txFrom, to: txTo }, force),
+          cachedOutstanding(ent.id, "debtor", force),
+          cachedOutstanding(ent.id, "creditor", force),
         ]);
+        tb = await applyRgsMappings(tbRes.data, workspaceId, ent.id);
+        txns = await applyRgsMappings(txRes.data, workspaceId, ent.id);
+        deb = debRes.data;
+        cre = creRes.data;
+        for (const r of [tbRes, txRes, debRes, creRes]) if (!fetched.at || r.fetchedAt > fetched.at) fetched.at = r.fetchedAt;
       } catch (e) {
         status.push({ id: ent.id, name: ent.name, included: false, reason: e instanceof Error ? e.message : "Ophalen mislukt" });
         return;
@@ -268,6 +280,7 @@ export async function computeDashboardKpis(input: DashboardInput): Promise<Dashb
     },
     outstandingDebtors: { gross: debGross, intercompany: debIC, net: debGross - debIC },
     outstandingCreditors: { gross: creGross, intercompany: creIC, net: creGross - creIC },
+    cachedAt: fetched.at ? fetched.at.toISOString() : null,
     intercompanyConfigured,
     warnings,
   };

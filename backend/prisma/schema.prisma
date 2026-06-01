@@ -595,6 +595,26 @@ model ConsolidationRun {
   @@index([groupId])
 }
 
+// Day-cache of connector data (trial balance, transactions, debtors/creditors,
+// outstanding) per administration + params, so repeated views (dashboard,
+// grootboek, transacties, consolidatie) don't re-hit the accounting API every
+// time. The payload is AES-256-GCM encrypted at rest (financial data → AVG);
+// entries carry a fetchedAt for a TTL and "laatst opgehaald"-display, and can be
+// force-refreshed by the user.
+model ConnectorCache {
+  id        String   @id @default(uuid())
+  entityId  String
+  method    String // "trialBalance" | "transactions" | "debtors" | "creditors" | "outstanding"
+  paramsKey String // e.g. "2025-01-01|2025-12-31" or "debtor"
+  payload   String // AES-256-GCM encrypted JSON of the raw connector result
+  rowCount  Int      @default(0)
+  fetchedAt DateTime @default(now())
+
+  @@unique([entityId, method, paramsKey])
+  @@index([entityId])
+  @@index([fetchedAt])
+}
+
 // Manual consolidation correction (double-entry): a journal the auto-elimination
 // can't infer — intercompany profit in inventory, reclassifications, roundings.
 // Applied on top of the consolidated figures for periods covering effectiveDate.

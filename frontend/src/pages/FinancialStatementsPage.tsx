@@ -1,10 +1,11 @@
-import { Fragment, useMemo, useState } from "react";
+import { Fragment, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { useScope } from "../contexts/ScopeContext";
 import { api, ApiError } from "../services/api";
 import { formatMoney } from "../lib/period";
 import { ExportButtons } from "../components/ExportButtons";
+import { CacheBar } from "../components/CacheBar";
 import { categorize, display, type Cat, type Side } from "../lib/rgsPresentation";
 import { ConsolidatedStatementsPage } from "./ConsolidatedStatementsPage";
 
@@ -39,12 +40,22 @@ function SingleEntityStatements() {
   const [open, setOpen] = useState<Set<string>>(new Set());
   const [grouped, setGrouped] = useState(true);
 
-  const { data, isLoading, isError, error } = useQuery({
+  const forceRef = useRef(false);
+  const { data, isLoading, isError, error, isFetching, refetch } = useQuery({
     queryKey: ["trial-balance", entity?.id, range.from, range.to],
-    queryFn: () =>
-      api<{ rows: TbLine[] }>(`/api/yuki/trial-balance?from=${range.from}&to=${range.to}`),
+    queryFn: () => {
+      const f = forceRef.current;
+      forceRef.current = false;
+      return api<{ rows: TbLine[]; cachedAt?: string | null }>(
+        `/api/yuki/trial-balance?from=${range.from}&to=${range.to}${f ? "&refresh=1" : ""}`,
+      );
+    },
     enabled: !!entity,
   });
+  const refresh = () => {
+    forceRef.current = true;
+    refetch();
+  };
 
   const rows = data?.rows ?? [];
   const hasRgs = rows.some((r) => r.rgsGroupCode);
@@ -154,6 +165,7 @@ function SingleEntityStatements() {
           <p className="text-sm text-slate-500 mt-1">
             {entity ? `${entity.name} · ${range.from} t/m ${range.to}` : "Selecteer een administratie"}
           </p>
+          {entity && <div className="mt-1"><CacheBar cachedAt={data?.cachedAt} refreshing={isFetching} onRefresh={refresh} /></div>}
         </div>
         {data && (
           <div className="flex items-center gap-3">

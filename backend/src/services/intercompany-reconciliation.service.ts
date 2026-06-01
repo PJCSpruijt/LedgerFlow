@@ -2,6 +2,7 @@ import { prisma } from "../config/prisma.js";
 import { tryGetConnectorForEntity } from "../clients/connectors/registry.js";
 import { applyRgsMappings } from "./rgs-mapping.service.js";
 import { getIntercompanyRelations, normName } from "./intercompany.service.js";
+import { cachedTrialBalance, cachedTransactions } from "./connector-cache.service.js";
 import { convert, prefetchRates } from "./fx.service.js";
 
 /**
@@ -117,6 +118,7 @@ export interface ReconResult {
   pairs: ReconPairResult[];
   rows: ReconRow[];
   summary: { matched: number; oneSided: number; mismatched: number };
+  cachedAt: string | null;
   warnings: string[];
 }
 
@@ -146,10 +148,13 @@ export async function reconcileIntercompany(input: {
   from: string;
   to: string;
   currency: string;
+  refresh?: boolean;
 }): Promise<ReconResult> {
   const { workspaceId, from, to, currency } = input;
   const groupId = input.groupId ?? null;
+  const force = input.refresh ?? false;
   const warnings: string[] = [];
+  let lastFetchedAt: Date | null = null;
 
   const entities = await prisma.entity.findMany({
     where: groupId ? { groupId, group: { workspaceId } } : { group: { workspaceId } },
@@ -171,10 +176,13 @@ export async function reconcileIntercompany(input: {
     }
     let tb, txns;
     try {
-      [tb, txns] = await Promise.all([
-        connector.getTrialBalance({ from, to }).then((r) => applyRgsMappings(r, workspaceId, ent.id)),
-        connector.getTransactions({ from, to }).then((r) => applyRgsMappings(r, workspaceId, ent.id)),
+      const [tbRes, txRes] = await Promise.all([
+        cachedTrialBalance(ent.id, { from, to }, force),
+        cachedTransactions(ent.id, { from, to }, force),
       ]);
+      tb = await applyRgsMappings(tbRes.data, workspaceId, ent.id);
+      txns = await applyRgsMappings(txRes.data, workspaceId, ent.id);
+      for (const r of [tbRes, txRes]) if (!lastFetchedAt || r.fetchedAt > lastFetchedAt) lastFetchedAt = r.fetchedAt;
     } catch (e) {
       status.push({ id: ent.id, name: ent.name, included: false, reason: e instanceof Error ? e.message : "Ophalen mislukt" });
       continue;
@@ -349,6 +357,7 @@ export async function reconcileIntercompany(input: {
       oneSided: pairs.filter((p) => p.status === "ONE_SIDED").length,
       mismatched: pairs.filter((p) => p.status === "MISMATCH").length,
     },
+    cachedAt: lastFetchedAt ? lastFetchedAt.toISOString() : null,
     warnings,
   };
 }

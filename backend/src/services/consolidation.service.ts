@@ -4,6 +4,7 @@ import type { Connector, TrialBalanceLine } from "../clients/connectors/interfac
 import { applyRgsMappings, resolveRgsVersion } from "./rgs-mapping.service.js";
 import { getIntercompanyRelations, normName, type IcRel } from "./intercompany.service.js";
 import { getAdjustmentLeaves } from "./consolidation-adjustment.service.js";
+import { cachedTrialBalance, cachedTransactions } from "./connector-cache.service.js";
 import { convert, prefetchRates } from "./fx.service.js";
 
 /**
@@ -32,6 +33,8 @@ export interface ConsolidationInput {
   currency: string;
   /** Also compute intercompany elimination entries + imbalance warnings. */
   eliminate?: boolean;
+  /** Bypass the connector day-cache and re-fetch live. */
+  refresh?: boolean;
 }
 
 export interface ConsolEntityStatus {
@@ -100,6 +103,8 @@ export interface ConsolidationResult {
   imbalances: ImbalanceWarning[];
   /** Whether any intercompany relations are configured for this scope. */
   intercompanyConfigured: boolean;
+  /** When the underlying connector data was last fetched (ISO), or null. */
+  cachedAt: string | null;
   warnings: string[];
 }
 
@@ -110,6 +115,7 @@ export async function consolidate(input: ConsolidationInput): Promise<Consolidat
   const { workspaceId, from, to, currency } = input;
   const groupId = input.groupId ?? null;
   const warnings: string[] = [];
+  const fetched: { at: Date | null } = { at: null };
 
   const settings = await prisma.workspaceSettings.findUnique({ where: { workspaceId } });
   const rgsEnabled = settings?.rgsEnabled ?? false;
@@ -142,8 +148,9 @@ export async function consolidate(input: ConsolidationInput): Promise<Consolidat
         return null;
       }
       try {
-        const tb = await connector.getTrialBalance({ from, to });
-        const lines = await applyRgsMappings(tb, workspaceId, ent.id);
+        const tbRes = await cachedTrialBalance(ent.id, { from, to }, input.refresh);
+        const lines = await applyRgsMappings(tbRes.data, workspaceId, ent.id);
+        if (!fetched.at || tbRes.fetchedAt > fetched.at) fetched.at = tbRes.fetchedAt;
         status.push({ entityId: ent.id, entityName: ent.name, groupId: ent.groupId, included: true });
         return { ent, lines, connector };
       } catch (e) {
@@ -232,7 +239,7 @@ export async function consolidate(input: ConsolidationInput): Promise<Consolidat
   let eliminations: ConsolLeafRow[] = [];
   let imbalances: ImbalanceWarning[] = [];
   if (input.eliminate && intercompanyConfigured) {
-    const elim = await computeEliminations(loaded, icRels, workspaceId, currency, from, to, warnings);
+    const elim = await computeEliminations(loaded, icRels, workspaceId, currency, from, to, warnings, input.refresh ?? false);
     eliminations = elim.eliminations;
     imbalances = elim.imbalances;
   }
@@ -255,6 +262,7 @@ export async function consolidate(input: ConsolidationInput): Promise<Consolidat
     adjustments,
     imbalances,
     intercompanyConfigured,
+    cachedAt: fetched.at ? fetched.at.toISOString() : null,
     warnings: [...new Set(warnings)],
   };
 }
@@ -296,6 +304,7 @@ async function computeEliminations(
   from: string,
   to: string,
   warnings: string[],
+  force: boolean,
 ): Promise<{ eliminations: ConsolLeafRow[]; imbalances: ImbalanceWarning[] }> {
   const nameById = new Map(loaded.map((e) => [e.ent.id, e.ent.name]));
 
@@ -328,7 +337,7 @@ async function computeEliminations(
     netBS.set(a, inner);
   };
 
-  for (const { ent, connector } of loaded) {
+  for (const { ent } of loaded) {
     const rels = icRels.get(ent.id);
     if (!rels || rels.length === 0) continue;
     const nameToCp = new Map<string, string>();
@@ -336,7 +345,8 @@ async function computeEliminations(
 
     let txns;
     try {
-      txns = await applyRgsMappings(await connector.getTransactions({ from, to }), workspaceId, ent.id);
+      const txRes = await cachedTransactions(ent.id, { from, to }, force);
+      txns = await applyRgsMappings(txRes.data, workspaceId, ent.id);
     } catch (e) {
       warnings.push(`${ent.name}: transacties voor eliminatie konden niet worden opgehaald (${e instanceof Error ? e.message : "fout"}).`);
       continue;

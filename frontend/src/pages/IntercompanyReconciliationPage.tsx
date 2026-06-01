@@ -1,8 +1,10 @@
+import { useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useScope } from "../contexts/ScopeContext";
 import { api, ApiError } from "../services/api";
 import { formatMoney } from "../lib/period";
 import { ExportButtons } from "../components/ExportButtons";
+import { CacheBar } from "../components/CacheBar";
 
 type Category = "EQUITY_INVESTMENT" | "CURRENT_ACCOUNT" | "LOAN" | "RECEIVABLE_PAYABLE" | "REVENUE_COST";
 interface PairResult {
@@ -35,6 +37,7 @@ interface ReconResult {
   pairs: PairResult[];
   rows: ReconRow[];
   summary: { matched: number; oneSided: number; mismatched: number };
+  cachedAt?: string | null;
   warnings: string[];
 }
 
@@ -58,11 +61,20 @@ function StatusBadge({ status }: { status: PairResult["status"] }) {
 export function IntercompanyReconciliationPage() {
   const { workspace, group, entity, dateFrom, dateTo, currency } = useScope();
 
-  const { data, isLoading, isError, error } = useQuery({
+  const forceRef = useRef(false);
+  const { data, isLoading, isError, error, isFetching, refetch } = useQuery({
     queryKey: ["ic-reconciliation", workspace?.id, group?.id, entity?.id, dateFrom, dateTo, currency],
-    queryFn: () => api<ReconResult>(`/api/consolidation/reconciliation?from=${dateFrom}&to=${dateTo}&currency=${currency}`),
+    queryFn: () => {
+      const f = forceRef.current;
+      forceRef.current = false;
+      return api<ReconResult>(`/api/consolidation/reconciliation?from=${dateFrom}&to=${dateTo}&currency=${currency}${f ? "&refresh=1" : ""}`);
+    },
     enabled: !!workspace,
   });
+  const refresh = () => {
+    forceRef.current = true;
+    refetch();
+  };
 
   const scopeLabel = group ? `Groep: ${group.name}` : `Werkruimte: ${workspace?.name ?? "—"}`;
   const cats = CATEGORY_ORDER.filter((c) => data?.pairs.some((p) => p.category === c) || data?.rows.some((r) => r.category === c));
@@ -75,6 +87,7 @@ export function IntercompanyReconciliationPage() {
           <p className="text-sm text-slate-500 mt-1">
             {scopeLabel} · {dateFrom} t/m {dateTo} · {currency} · per type gesignaleerd of de onderlinge posten sluiten
           </p>
+          {workspace && <div className="mt-1"><CacheBar cachedAt={data?.cachedAt} refreshing={isFetching} onRefresh={refresh} /></div>}
         </div>
         {data && (
           <ExportButtons
