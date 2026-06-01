@@ -211,6 +211,11 @@ export function DashboardPage() {
     enabled: !!entity,
   });
   const connected = connResp?.connection != null;
+  // Zijn er al koppelingen in de werkruimte/scope? Dan is de "Aan de slag"-
+  // onboarding (en de koppeling-kaart) niet meer nodig. Signaal: de geselecteerde
+  // administratie is verbonden, óf minstens één administratie in de geconsolideerde
+  // scope is succesvol geladen (heeft dus een koppeling).
+  const hasConnections = connected || (kpis?.entities?.some((e) => e.included) ?? false);
 
   return (
     <div className="space-y-6">
@@ -338,15 +343,17 @@ export function DashboardPage() {
       )}
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div className="lf-card">
-          <div className="text-xs uppercase tracking-wide text-slate-500">Boekhoudkoppeling</div>
-          <div className="mt-2 text-lg font-semibold">
-            {!entity ? "Selecteer een administratie" : connected ? "Verbonden" : "Nog niet ingesteld"}
+        {!hasConnections && (
+          <div className="lf-card">
+            <div className="text-xs uppercase tracking-wide text-slate-500">Boekhoudkoppeling</div>
+            <div className="mt-2 text-lg font-semibold">
+              {!entity ? "Selecteer een administratie" : connected ? "Verbonden" : "Nog niet ingesteld"}
+            </div>
+            <Link to="/data/connectors" className="lf-link text-sm mt-3 inline-block">
+              Naar koppeling →
+            </Link>
           </div>
-          <Link to="/data/connectors" className="lf-link text-sm mt-3 inline-block">
-            Naar koppeling →
-          </Link>
-        </div>
+        )}
 
         <div className="lf-card">
           <div className="text-xs uppercase tracking-wide text-slate-500">Abonnement</div>
@@ -377,6 +384,7 @@ export function DashboardPage() {
         </div>
       </div>
 
+      {!hasConnections && (
       <div className="lf-card">
         <h2 className="text-lg font-semibold mb-2">Aan de slag</h2>
         <ol className="list-decimal pl-5 space-y-2 text-sm text-slate-700">
@@ -400,6 +408,7 @@ export function DashboardPage() {
           </li>
         </ol>
       </div>
+      )}
     </div>
   );
 }
