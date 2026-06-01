@@ -1,4 +1,4 @@
-import { useRef } from "react";
+import { useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { useScope } from "../contexts/ScopeContext";
@@ -185,13 +185,18 @@ export function DashboardPage() {
   });
   const sub = subResp?.subscription ?? null;
 
+  // Dashboard weergave: geconsolideerd (werkruimte/groep) of één administratie.
+  const [dashView, setDashView] = useState<"consolidated" | "entity">("consolidated");
+  const entityView = dashView === "entity" && !!entity;
   const forceRef = useRef(false);
   const { data: kpis, isLoading: kpisLoading, isFetching: kpisFetching, refetch: refetchKpis } = useQuery({
-    queryKey: ["dashboard-kpis", workspace?.id, group?.id, entity?.id, dateFrom, dateTo, currency],
+    queryKey: ["dashboard-kpis", workspace?.id, group?.id, entity?.id, dateFrom, dateTo, currency, entityView],
     queryFn: () => {
       const f = forceRef.current;
       forceRef.current = false;
-      return api<Kpis>(`/api/dashboard/kpis?from=${dateFrom}&to=${dateTo}&currency=${currency}${f ? "&refresh=1" : ""}`);
+      return api<Kpis>(
+        `/api/dashboard/kpis?from=${dateFrom}&to=${dateTo}&currency=${currency}${entityView ? "&scope=entity" : ""}${f ? "&refresh=1" : ""}`,
+      );
     },
     enabled: !!workspace,
   });
@@ -228,7 +233,26 @@ export function DashboardPage() {
           {kpis && (
             <>
               <div className="flex items-center justify-between flex-wrap gap-2">
-                <h2 className="text-lg font-semibold">Kerncijfers</h2>
+                <div className="flex items-center gap-3 flex-wrap">
+                  <h2 className="text-lg font-semibold">Kerncijfers</h2>
+                  {/* Weergave: geconsolideerd (werkruimte/groep) of één administratie */}
+                  <div className="inline-flex rounded-md border border-slate-200 overflow-hidden text-xs">
+                    <button
+                      className={`px-2.5 py-1 ${!entityView ? "bg-brand-50 text-brand-700 font-medium" : "text-slate-500 hover:bg-slate-50"}`}
+                      onClick={() => setDashView("consolidated")}
+                    >
+                      {group ? "Groep" : "Werkruimte"}
+                    </button>
+                    <button
+                      className={`px-2.5 py-1 border-l border-slate-200 ${entityView ? "bg-brand-50 text-brand-700 font-medium" : "text-slate-500 hover:bg-slate-50"} disabled:opacity-40`}
+                      disabled={!entity}
+                      title={entity ? `Alleen ${entity.name}` : "Selecteer eerst een administratie"}
+                      onClick={() => setDashView("entity")}
+                    >
+                      {entity ? entity.name : "Administratie"}
+                    </button>
+                  </div>
+                </div>
                 <div className="flex items-center gap-3 flex-wrap">
                   <div className="text-xs text-slate-400">
                     {dateFrom} t/m {dateTo} · {kpis.currency}

@@ -278,6 +278,14 @@ export function AdminPage() {
   const [showNewWs, setShowNewWs] = useState(false);
   const [editWs, setEditWs] = useState<{ id: string; name: string; type: string } | null>(null);
   const [moveEntityId, setMoveEntityId] = useState<string | null>(null);
+  const [expandedWs, setExpandedWs] = useState<Set<string>>(new Set());
+  const [wsFilter, setWsFilter] = useState("");
+  const toggleWs = (id: string) =>
+    setExpandedWs((prev) => {
+      const n = new Set(prev);
+      n.has(id) ? n.delete(id) : n.add(id);
+      return n;
+    });
 
   const run = async (fn: () => Promise<unknown>) => {
     setErr(null);
@@ -346,6 +354,9 @@ export function AdminPage() {
       setMoveEntityId(null);
     });
 
+  const filteredWorkspaces = workspaces.filter(
+    (w) => !wsFilter.trim() || w.name.toLowerCase().includes(wsFilter.trim().toLowerCase()),
+  );
   // Flat list of all groups across workspaces, for the move target picker.
   const allGroups = workspaces.flatMap((w) =>
     w.groups.map((g) => ({ id: g.id, label: `${w.name} › ${g.name}` })),
@@ -439,15 +450,29 @@ export function AdminPage() {
       </div>
 
       <div className="lf-card">
-        <div className="flex items-center justify-between mb-3">
+        <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
           <h2 className="text-lg font-semibold">Werkruimtes &amp; administraties</h2>
-          <button
-            className="lf-btn-primary"
-            onClick={() => setShowNewWs((v) => !v)}
-            disabled={showNewWs}
-          >
-            + Nieuwe werkruimte
-          </button>
+          <div className="flex items-center gap-2">
+            <input
+              className="lf-input text-sm h-9 w-48"
+              placeholder="Zoek werkruimte…"
+              value={wsFilter}
+              onChange={(e) => setWsFilter(e.target.value)}
+            />
+            <button
+              className="lf-link text-xs whitespace-nowrap"
+              onClick={() =>
+                setExpandedWs((prev) =>
+                  prev.size >= filteredWorkspaces.length ? new Set() : new Set(filteredWorkspaces.map((w) => w.id)),
+                )
+              }
+            >
+              {expandedWs.size >= filteredWorkspaces.length && filteredWorkspaces.length > 0 ? "Alles inklappen" : "Alles uitklappen"}
+            </button>
+            <button className="lf-btn-primary" onClick={() => setShowNewWs((v) => !v)} disabled={showNewWs}>
+              + Nieuwe werkruimte
+            </button>
+          </div>
         </div>
         {showNewWs && (
           <NewWorkspaceForm
@@ -459,32 +484,45 @@ export function AdminPage() {
             }}
           />
         )}
-        <div className="space-y-5">
-          {workspaces.map((ws) => (
-            <div key={ws.id} className="border border-slate-200 rounded-lg p-4">
-              <div className="flex items-center justify-between flex-wrap gap-2">
-                <div>
-                  <div className="font-semibold">{ws.name}</div>
-                  <div className="text-xs text-slate-500">
-                    {ws.type} · {ws.memberCount} {ws.memberCount === 1 ? "lid" : "leden"} · aangemaakt{" "}
-                    {fmtDate(ws.createdAt)}
+        {filteredWorkspaces.length === 0 && (
+          <div className="text-sm text-slate-400">Geen werkruimtes gevonden.</div>
+        )}
+        <div className="space-y-2">
+          {filteredWorkspaces.map((ws) => {
+            const isExp = expandedWs.has(ws.id);
+            const entCount = ws.groups.reduce((s, g) => s + g.entities.length, 0);
+            const connCount = ws.groups.reduce((s, g) => s + g.entities.filter((e) => e.connection).length, 0);
+            return (
+            <div key={ws.id} className="border border-slate-200 rounded-lg">
+              <button
+                className="w-full text-left px-4 py-3 flex items-center justify-between flex-wrap gap-2 hover:bg-slate-50"
+                onClick={() => toggleWs(ws.id)}
+              >
+                <div className="flex items-center gap-2 min-w-0">
+                  <span className="text-slate-400 w-4 shrink-0">{isExp ? "▾" : "▸"}</span>
+                  <div className="min-w-0">
+                    <div className="font-semibold truncate">{ws.name}</div>
+                    <div className="text-xs text-slate-500">
+                      {ws.type === "ACCOUNTING_FIRM" ? "Accountantskantoor" : "Bedrijf"} · {ws.groups.length} groep(en) ·{" "}
+                      {entCount} administratie(s) · {connCount} gekoppeld · {ws.memberCount} {ws.memberCount === 1 ? "lid" : "leden"}
+                    </div>
                   </div>
                 </div>
-                <div className="text-xs">
+                <span className="text-xs shrink-0">
                   {ws.subscription ? (
-                    <span className="text-slate-600">
-                      {ws.subscription.planName ?? "Geen plan"} — {ws.subscription.status}
-                      {ws.subscription.validUntil
-                        ? ` (tot ${fmtDate(ws.subscription.validUntil)})`
-                        : ""}
+                    <span className="lf-pill bg-slate-100 text-slate-700">
+                      {ws.subscription.planName ?? "Geen plan"} · {ws.subscription.status}
                     </span>
                   ) : (
-                    <span className="text-slate-400">Geen abonnement</span>
+                    <span className="lf-pill bg-slate-200 text-slate-500">Geen abonnement</span>
                   )}
-                </div>
-              </div>
+                </span>
+              </button>
+              {isExp && (
+              <div className="px-4 pb-4 pt-2 border-t border-slate-100">
+              <div className="text-xs text-slate-400 mb-2">Aangemaakt {fmtDate(ws.createdAt)}</div>
 
-              <div className="mt-2 flex flex-wrap gap-4 text-xs">
+              <div className="flex flex-wrap gap-4 text-xs">
                 <button
                   className="lf-link"
                   onClick={() => setEditWs({ id: ws.id, name: ws.name, type: ws.type })}
@@ -614,8 +652,11 @@ export function AdminPage() {
                   </div>
                 ))}
               </div>
+              </div>
+              )}
             </div>
-          ))}
+            );
+          })}
         </div>
       </div>
     </div>

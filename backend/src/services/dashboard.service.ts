@@ -58,6 +58,8 @@ export interface DashboardKpis {
 export interface DashboardInput {
   workspaceId: string;
   groupId?: string | null;
+  /** Narrow to a single administration (the "administratie"-weergave). */
+  entityId?: string | null;
   from: string;
   to: string;
   currency: string;
@@ -87,7 +89,11 @@ export async function computeDashboardKpis(input: DashboardInput): Promise<Dashb
   const txTo = to;
 
   const entities = await prisma.entity.findMany({
-    where: groupId ? { groupId, group: { workspaceId } } : { group: { workspaceId } },
+    where: input.entityId
+      ? { id: input.entityId, group: { workspaceId } }
+      : groupId
+        ? { groupId, group: { workspaceId } }
+        : { group: { workspaceId } },
     select: { id: true, name: true },
     orderBy: { name: "asc" },
   });

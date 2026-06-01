@@ -19,7 +19,7 @@ const KpiQuery = z.object({
   from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "from must be yyyy-MM-dd"),
   to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "to must be yyyy-MM-dd"),
   currency: z.string().length(3).optional(),
-  scope: z.enum(["group", "workspace"]).optional(),
+  scope: z.enum(["group", "workspace", "entity"]).optional(),
   refresh: z.string().optional(),
 });
 
@@ -29,10 +29,13 @@ dashboardRouter.get(
   asyncHandler(async (req, res) => {
     const q = req.query as unknown as z.infer<typeof KpiQuery>;
     const workspaceId = req.scope!.workspaceId;
+    // "entity" → single administration; "workspace" → whole workspace; else the selected group.
+    const entityId = q.scope === "entity" ? req.scope!.entityId ?? null : null;
     const groupId = q.scope === "workspace" ? null : req.scope!.groupId ?? null;
     const kpis = await computeDashboardKpis({
       workspaceId,
       groupId,
+      entityId,
       from: q.from,
       to: q.to,
       currency: (q.currency ?? "EUR").toUpperCase(),
