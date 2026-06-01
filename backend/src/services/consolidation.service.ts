@@ -6,6 +6,7 @@ import { getIntercompanyRelations, normName, type IcRel } from "./intercompany.s
 import { getAdjustmentLeaves } from "./consolidation-adjustment.service.js";
 import { cachedTrialBalance, cachedTransactions } from "./connector-cache.service.js";
 import { convert, prefetchRates } from "./fx.service.js";
+import { buildEliminationResolver } from "./elimination-mapping.service.js";
 
 /**
  * Consolidation (RGS-B). Aggregates the trial balances of every administration
@@ -307,6 +308,9 @@ async function computeEliminations(
   force: boolean,
 ): Promise<{ eliminations: ConsolLeafRow[]; imbalances: ImbalanceWarning[] }> {
   const nameById = new Map(loaded.map((e) => [e.ent.id, e.ent.name]));
+  // Per-account elimination overrides: let the user exclude an account from
+  // elimination (eliminate=false) or pin its counterparty administration.
+  const elimResolver = await buildEliminationResolver(workspaceId, loaded.map((e) => ({ id: e.ent.id, name: e.ent.name })));
 
   // Per-entity, per-account closing balance (reporting currency) + RGS metadata.
   const balByEntity = new Map<string, Map<string, AccountMeta>>();
@@ -373,10 +377,14 @@ async function computeEliminations(
     for (const [acct, agg] of perAcct) {
       if (Math.abs(agg.ic) < 0.005) continue;
       const meta = bal?.get(acct);
-      // Dominant counterparty on this account.
+      // Manual override: skip accounts explicitly marked "niet elimineren".
+      const dec = elimResolver.resolve(ent.id, acct, meta?.name ?? acct);
+      if (!dec.eliminate) continue;
+      // Dominant counterparty on this account (override pins it when set).
       let cp = "";
       let best = 0;
       for (const [c, v] of agg.cpAmt) if (Math.abs(v) > Math.abs(best)) ((best = v), (cp = c));
+      if (dec.counterpartyId) cp = dec.counterpartyId;
       // Dedicated intragroup accounts → eliminate the full closing balance;
       // mixed accounts → eliminate only the intercompany flow in the period.
       const eliminateFull = meta ? isIntragroupCode(meta.rgsCode) : false;

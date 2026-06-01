@@ -14,6 +14,7 @@ import {
 } from "../services/consolidation-run.service.js";
 import { listAdjustments, createAdjustment, deleteAdjustment } from "../services/consolidation-adjustment.service.js";
 import { reconcileIntercompany } from "../services/intercompany-reconciliation.service.js";
+import { listEliminationAccounts, setEliminationMapping } from "../services/elimination-mapping.service.js";
 import { NotFoundError } from "../utils/errors.js";
 import { validateParams } from "../middleware/validate.js";
 
@@ -124,6 +125,64 @@ consolidationRouter.get(
         refresh: q.refresh === "1",
       }),
     );
+  }),
+);
+
+// ---- Elimination account mapping (per-account override) -------------------
+
+const ElimAccountsQuery = z.object({
+  from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  currency: z.string().length(3).optional(),
+  scope: z.enum(["group", "workspace"]).optional(),
+  refresh: z.string().optional(),
+});
+
+consolidationRouter.get(
+  "/elimination-accounts",
+  validateQuery(ElimAccountsQuery),
+  asyncHandler(async (req, res) => {
+    const q = req.query as unknown as z.infer<typeof ElimAccountsQuery>;
+    const groupId = q.scope === "workspace" ? null : req.scope!.groupId ?? null;
+    res.json(
+      await listEliminationAccounts({
+        workspaceId: req.scope!.workspaceId,
+        groupId,
+        from: q.from,
+        to: q.to,
+        currency: (q.currency ?? "EUR").toUpperCase(),
+        refresh: q.refresh === "1",
+      }),
+    );
+  }),
+);
+
+const SetElimBody = z.object({
+  entityId: z.string().min(1),
+  glAccountCode: z.string().min(1),
+  glAccountName: z.string().nullable().optional(),
+  /** null = remove the override (back to auto-detection). */
+  eliminate: z.boolean().nullable(),
+  counterpartyEntityId: z.string().nullable().optional(),
+  category: z.string().nullable().optional(),
+});
+
+consolidationRouter.post(
+  "/elimination-mappings",
+  validateBody(SetElimBody),
+  asyncHandler(async (req, res) => {
+    const b = req.body as z.infer<typeof SetElimBody>;
+    await setEliminationMapping({
+      workspaceId: req.scope!.workspaceId,
+      entityId: b.entityId,
+      glAccountCode: b.glAccountCode,
+      glAccountName: b.glAccountName ?? null,
+      eliminate: b.eliminate,
+      counterpartyEntityId: b.counterpartyEntityId ?? null,
+      category: b.category ?? null,
+      userId: req.user?.id ?? null,
+    });
+    res.json({ ok: true });
   }),
 );
 

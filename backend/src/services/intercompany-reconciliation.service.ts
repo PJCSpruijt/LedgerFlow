@@ -4,6 +4,7 @@ import { applyRgsMappings } from "./rgs-mapping.service.js";
 import { getIntercompanyRelations, normName } from "./intercompany.service.js";
 import { cachedTrialBalance, cachedTransactions, cachedOutstanding } from "./connector-cache.service.js";
 import { convert, prefetchRates } from "./fx.service.js";
+import { buildEliminationResolver } from "./elimination-mapping.service.js";
 
 /**
  * Intercompany reconciliation / mismatch engine (consolidation Fase 2).
@@ -177,6 +178,11 @@ export async function reconcileIntercompany(input: {
   const nameById = new Map(entities.map((e) => [e.id, e.name]));
   const candIds = entities.map((e) => ({ id: e.id, n: normName(e.name) }));
   const icRels = await getIntercompanyRelations(entities.map((e) => e.id));
+  // Per-account elimination resolver (Layer 1 auto + Layer 2 manual override):
+  // decides whether a deelneming/RC/lening account eliminates and against which
+  // in-scope administration. A participation naming a company OUTSIDE the
+  // consolidation resolves to "do not eliminate" (counterparty null).
+  const elimResolver = await buildEliminationResolver(workspaceId, entities);
 
   const status: ReconResult["entities"] = [];
   const positions: Position[] = [];
@@ -218,27 +224,27 @@ export async function reconcileIntercompany(input: {
     const nameToCp = new Map<string, string>();
     for (const r of icRels.get(ent.id) ?? []) if (r.relationName) nameToCp.set(normName(r.relationName), r.counterpartyEntityId);
 
-    // Resolve a counterparty for a balance account: name reference → other entity → (2 entities) the other.
-    const counterpartyForAccount = (accountName: string): string | null => {
-      const an = normName(accountName);
-      const byName = candIds.find((c) => c.id !== ent.id && c.n && an.includes(c.n));
-      if (byName) return byName.id;
-      const others = candIds.filter((c) => c.id !== ent.id);
-      return others.length === 1 ? others[0]!.id : null;
-    };
-
     // Balance-sheet intragroup positions (RC / loan / deelneming / equity) at closing balance.
     for (const l of tb) {
       const cls = classify(l.glAccountName, l.rgsCode ?? null, l.rgsGroupCode ?? null, l.accountType === "PROFIT_LOSS");
       if (!cls || cls.basis !== "balance") continue;
       const amt = (await convert(l.balance, (l.currency || currency).toUpperCase(), currency, to)) ?? l.balance;
       if (Math.abs(amt) < 0.005) continue;
+      // EQUITY's counterparty is back-filled later (subsidiary equity ↔ parent
+      // deelneming). For INVESTMENT/RC/LOAN the resolver decides eliminate +
+      // counterparty; a participation outside the consolidation resolves to null
+      // (shown, not eliminated).
+      let counterpartyId: string | null = null;
+      if (cls.side !== "EQUITY") {
+        const dec = elimResolver.resolve(ent.id, l.glAccountCode, l.glAccountName);
+        counterpartyId = dec.eliminate ? dec.counterpartyId : null;
+      }
       positions.push({
         entityId: ent.id,
         entityName: ent.name,
         category: cls.category,
         side: cls.side,
-        counterpartyId: cls.side === "EQUITY" ? null : counterpartyForAccount(l.glAccountName),
+        counterpartyId,
         accountCode: l.glAccountCode,
         accountName: l.glAccountName,
         rgsCode: l.rgsCode ?? null,

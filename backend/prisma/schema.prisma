@@ -573,6 +573,32 @@ model IntercompanyRelation {
   @@index([counterpartyEntityId])
 }
 
+// Per-account elimination override (capital/RC/loan consolidation). Controls
+// whether a specific GL account in an administration is eliminated on
+// consolidation and against WHICH workspace administration. Auto-detection
+// suggests a default from the account name (a participation/RC naming an
+// in-scope administration eliminates against it; one naming a company OUTSIDE
+// the consolidation must NOT be eliminated). This row is the manual override
+// that wins over auto-detection. Keyed per (entity, glAccountCode).
+model EliminationAccountMapping {
+  id                   String   @id @default(uuid())
+  workspaceId          String
+  entityId             String // administration where the GL account lives
+  glAccountCode        String // the grootboekrekening
+  glAccountName        String?
+  eliminate            Boolean  @default(true) // false = never eliminate this account
+  counterpartyEntityId String? // which workspace administration is the counterparty
+  category             String? // optional category override (EQUITY_INVESTMENT/CURRENT_ACCOUNT/LOAN/…)
+  note                 String?
+  createdByUserId      String?
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  @@unique([entityId, glAccountCode])
+  @@index([workspaceId])
+  @@index([counterpartyEntityId])
+}
+
 // A frozen, point-in-time consolidation result. Stores the full computed
 // snapshot (leaves, eliminations, imbalances, entities) so a consolidated
 // reporting position is reproducible even when the live connector data changes.
