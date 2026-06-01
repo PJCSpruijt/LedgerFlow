@@ -218,7 +218,7 @@ export function AppShell() {
               const atBase = pathname === activeModule.basePath;
               return (
                 <div className="bg-white border-b border-slate-200 px-6 no-print">
-                  <div className="flex gap-1 overflow-x-auto">
+                  <div className="flex gap-1 overflow-x-auto overflow-y-hidden">
                     {subs.map((sp, i) => (
                       <NavLink
                         key={sp.path}
