@@ -8,7 +8,7 @@ import { RegisterPage } from "./pages/RegisterPage";
 import { BillingPage } from "./pages/BillingPage";
 import { AcceptInvitationPage, ResetPasswordPage } from "./pages/SetPasswordPage";
 import { MandatoryTwoFactorPage } from "./pages/MandatoryTwoFactorPage";
-import { MODULES, LEGACY_REDIRECTS } from "./navigation/navConfig";
+import { MODULES, LEGACY_REDIRECTS, isScaffold } from "./navigation/navConfig";
 
 function RequireAuth({ children }: { children: ReactElement }) {
   const { user, loading } = useAuth();
@@ -69,8 +69,10 @@ export function App() {
         {MODULES.flatMap((mod) => {
           const wrap = (el: ReactElement) =>
             mod.platformAdminOnly ? <RequirePlatformAdmin>{el}</RequirePlatformAdmin> : el;
+          // The bare module path lands on its first OPERATIONAL subpage (skip scaffolds).
+          const firstReal = mod.subpages.find((sp) => !isScaffold(sp)) ?? mod.subpages[0]!;
           return [
-            <Route key={`${mod.key}-index`} path={mod.basePath} element={wrap(mod.subpages[0]!.element)} />,
+            <Route key={`${mod.key}-index`} path={mod.basePath} element={wrap(firstReal.element)} />,
             ...mod.subpages.map((sp) => (
               <Route key={`${mod.key}-${sp.path}`} path={`${mod.basePath}/${sp.path}`} element={wrap(sp.element)} />
             )),

@@ -58,6 +58,10 @@ export interface ModuleDef {
 
 const soon = (title: string): ReactElement => <Placeholder title={title} />;
 
+/** A subpage is a not-yet-built scaffold when it renders the Placeholder. Such
+ *  pages are hidden from the navigation entirely until they're operational. */
+export const isScaffold = (sp: SubPage): boolean => sp.element.type === Placeholder;
+
 export const MODULES: ModuleDef[] = [
   {
     key: "dashboard",

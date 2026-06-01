@@ -3,16 +3,11 @@ import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 import { isAdminRole, useScope, VIEW_LABELS, type ViewType } from "../contexts/ScopeContext";
 import { api } from "../services/api";
-import { MODULES, type ModuleDef, type SubPage } from "../navigation/navConfig";
+import { MODULES, isScaffold, type ModuleDef, type SubPage } from "../navigation/navConfig";
 import { useContextUrlSync } from "../navigation/useContextUrlSync";
 import { UserMenu } from "../components/UserMenu";
 import { ProductTour } from "../components/ProductTour";
 import { DateRangePicker } from "../components/DateRangePicker";
-import { Placeholder } from "../pages/Placeholder";
-
-/** Scaffold subpages (not yet built) render a Placeholder; hidden from non-admins. */
-const isScaffold = (sp: SubPage) => sp.element.type === Placeholder;
-
 const VIEW_TYPES = Object.keys(VIEW_LABELS) as ViewType[];
 
 /**
@@ -59,9 +54,9 @@ export function AppShell() {
   };
 
   const isPlatformAdmin = user?.platformRole === "PLATFORM_ADMIN";
-  // Subpages a normal user may see: scaffolds are hidden unless platform admin.
-  const visibleSubpages = (m: ModuleDef): SubPage[] =>
-    isPlatformAdmin ? m.subpages : m.subpages.filter((sp) => !isScaffold(sp));
+  // Not-yet-operational (scaffold) subpages are hidden from the navigation for
+  // everyone — including platform admins — until they're actually built.
+  const visibleSubpages = (m: ModuleDef): SubPage[] => m.subpages.filter((sp) => !isScaffold(sp));
   // Modules the user may reach (for routing + sub-nav), incl. hidden ones.
   // A module with only scaffold subpages is hidden from non-admins entirely.
   const accessibleModules = MODULES.filter(
