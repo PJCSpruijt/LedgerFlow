@@ -69,12 +69,17 @@ export async function computeDashboardKpis(input: DashboardInput): Promise<Dashb
   const groupId = input.groupId ?? null;
   const warnings: string[] = [];
 
-  // Revenue chart spans the reporting year (12 months) + the previous year, so
-  // transactions are fetched over a widened range (union with the selected period).
+  // Revenue chart shows 12 months of the reporting year. To keep the Yuki API
+  // footprint reasonable (each month is a separate GetTransactionDetails call,
+  // and large spans exhaust the daily limit), we fetch only year-to-date: from
+  // the start of the reporting year up to the selected end date — never the
+  // future, never the previous year. The previous-year comparison line needs a
+  // cached/synced transaction layer to serve sustainably (follow-up).
   const year = Number(to.slice(0, 4));
   const prevYear = year - 1;
-  const txFrom = `${prevYear}-01-01` < from ? `${prevYear}-01-01` : from;
-  const txTo = `${year}-12-31` > to ? `${year}-12-31` : to;
+  const yearStart = `${year}-01-01`;
+  const txFrom = yearStart < from ? yearStart : from;
+  const txTo = to;
 
   const entities = await prisma.entity.findMany({
     where: groupId ? { groupId, group: { workspaceId } } : { group: { workspaceId } },

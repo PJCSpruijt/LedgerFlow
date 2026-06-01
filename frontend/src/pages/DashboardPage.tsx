@@ -108,6 +108,7 @@ function WarningTile({ label, count, unit, to }: { label: string; count: number;
  * gross) with a previous-year comparison line overlaid.
  */
 function RevenueChart({ data, currency, prevYear }: { data: MonthRevenue[]; currency: string; prevYear: number }) {
+  const hasPrev = data.some((d) => Math.abs(d.previous) > 0.005);
   const max = Math.max(1, ...data.map((d) => Math.max(Math.abs(d.currentGross), Math.abs(d.previous))));
   const prevPoints = data
     .map((d, i) => `${((i + 0.5) / 12) * 100},${100 - (Math.max(0, d.previous) / max) * 100}`)
@@ -132,10 +133,12 @@ function RevenueChart({ data, currency, prevYear }: { data: MonthRevenue[]; curr
             );
           })}
         </div>
-        {/* Previous-year line */}
-        <svg className="absolute inset-0 w-full h-full pointer-events-none" viewBox="0 0 100 100" preserveAspectRatio="none">
-          <polyline points={prevPoints} fill="none" stroke="#475569" strokeWidth="0.7" vectorEffect="non-scaling-stroke" strokeDasharray="2 1.5" />
-        </svg>
+        {/* Previous-year line (only when prior-year data is available) */}
+        {hasPrev && (
+          <svg className="absolute inset-0 w-full h-full pointer-events-none" viewBox="0 0 100 100" preserveAspectRatio="none">
+            <polyline points={prevPoints} fill="none" stroke="#475569" strokeWidth="0.7" vectorEffect="non-scaling-stroke" strokeDasharray="2 1.5" />
+          </svg>
+        )}
       </div>
       <div className="flex gap-1 mt-1">
         {MONTHS.map((m) => (
@@ -261,7 +264,9 @@ export function DashboardPage() {
                       {kpis.revenueTotal.intercompany > 0.005 && (
                         <span className="text-rose-600"> · −{formatMoney(kpis.revenueTotal.intercompany, kpis.currency)} intercompany</span>
                       )}
-                      <span className="text-slate-400"> · {kpis.revenuePrevYear}: {formatMoney(kpis.revenuePrevTotal, kpis.currency)}</span>
+                      {kpis.revenuePrevTotal !== 0 && (
+                        <span className="text-slate-400"> · {kpis.revenuePrevYear}: {formatMoney(kpis.revenuePrevTotal, kpis.currency)}</span>
+                      )}
                     </div>
                   </div>
                   <RevenueChart data={kpis.revenueByMonth} currency={kpis.currency} prevYear={kpis.revenuePrevYear} />
@@ -272,9 +277,11 @@ export function DashboardPage() {
                     <span className="flex items-center gap-1">
                       <span className="inline-block w-3 h-3 bg-rose-200 rounded-sm" /> Intercompany (geëlimineerd)
                     </span>
-                    <span className="flex items-center gap-1">
-                      <span className="inline-block w-4 border-t-2 border-dashed border-slate-600" /> {kpis.revenuePrevYear}
-                    </span>
+                    {kpis.revenuePrevTotal !== 0 && (
+                      <span className="flex items-center gap-1">
+                        <span className="inline-block w-4 border-t-2 border-dashed border-slate-600" /> {kpis.revenuePrevYear}
+                      </span>
+                    )}
                   </div>
                 </div>
               )}
