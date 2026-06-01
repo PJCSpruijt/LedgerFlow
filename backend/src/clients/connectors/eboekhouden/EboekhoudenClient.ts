@@ -138,6 +138,13 @@ export class EboekhoudenClient {
 
     if (!res.ok) {
       logger.warn({ path, status: res.status, snippet: text.slice(0, 300) }, "e-Boekhouden API error");
+      // Rate-limit / daily-limit → clear message instead of a bare HTTP status.
+      if (res.status === 429 || /rate.?limit|limit exceeded|too many requests|quota/i.test(text)) {
+        throw new ConnectorError(
+          "Daglimiet/rate-limit van de e-Boekhouden-koppeling bereikt. De data kan tijdelijk niet worden opgehaald; probeer het later opnieuw.",
+          { statusCode: res.status, rateLimited: true, connector: "eboekhouden" },
+        );
+      }
       throw new ConnectorError(`e-Boekhouden ${path} gaf HTTP ${res.status}`, { snippet: text.slice(0, 300) });
     }
     return JSON.parse(text) as T;
