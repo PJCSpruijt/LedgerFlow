@@ -15,7 +15,7 @@ const STEPS = ["Pakket", "Gegevens", "Controle", "Klaar"];
 
 /**
  * Guided, step-by-step setup of a connector for the active administration.
- * Reuses the existing PUT /api/yuki/connection + GET /api/yuki/test-connection.
+ * Reuses the existing PUT /api/ledger/connection + GET /api/ledger/test-connection.
  */
 export function ConnectorWizard({ onClose }: { onClose: () => void }) {
   const { entity, reload } = useScope();
@@ -41,7 +41,7 @@ export function ConnectorWizard({ onClose }: { onClose: () => void }) {
         kind === "yuki"
           ? { kind, accessKey: form.accessKey, administrationId: form.administrationId, environment: form.environment }
           : { kind, accessToken: form.accessToken };
-      const r = await api<{ administrationName: string | null }>("/api/yuki/connection", { method: "PUT", body });
+      const r = await api<{ administrationName: string | null }>("/api/ledger/connection", { method: "PUT", body });
       setAdminName(r.administrationName);
       await reload();
       setStep(2);
@@ -56,7 +56,7 @@ export function ConnectorWizard({ onClose }: { onClose: () => void }) {
     setErr(null);
     setBusy(true);
     try {
-      setTest(await api<TestResult>("/api/yuki/test-connection"));
+      setTest(await api<TestResult>("/api/ledger/test-connection"));
     } catch (e) {
       setErr(e instanceof ApiError ? e.message : "Test mislukt");
     } finally {

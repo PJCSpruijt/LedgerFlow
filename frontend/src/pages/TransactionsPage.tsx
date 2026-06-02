@@ -199,7 +199,7 @@ export function TransactionsPage() {
       const f = forceRef.current;
       forceRef.current = false;
       return api<{ rows: Tx[]; cachedAt?: string | null }>(
-        `/api/yuki/transactions?from=${dateFrom}&to=${dateTo}&currency=${currency}${f ? "&refresh=1" : ""}`,
+        `/api/ledger/transactions?from=${dateFrom}&to=${dateTo}&currency=${currency}${f ? "&refresh=1" : ""}`,
       );
     },
     enabled: !!entity,

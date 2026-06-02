@@ -27,7 +27,7 @@ import { convert, prefetchRates } from "../services/fx.service.js";
 import { ConnectionKind } from "@prisma/client";
 import { BadRequestError, NotFoundError } from "../utils/errors.js";
 
-export const yukiRouter = Router();
+export const ledgerRouter = Router();
 
 /** A connection lives on an entity, so an entity must be selected. */
 function requireEntity(req: import("express").Request): string {
@@ -52,7 +52,7 @@ const ConnectionSchema = z.discriminatedUnion("kind", [
 ]);
 
 /** Store or update the connector credentials for the active entity. */
-yukiRouter.put(
+ledgerRouter.put(
   "/connection",
   requireAuth,
   requireScope,
@@ -112,7 +112,7 @@ yukiRouter.put(
   }),
 );
 
-yukiRouter.delete(
+ledgerRouter.delete(
   "/connection",
   requireAuth,
   requireScope,
@@ -124,7 +124,7 @@ yukiRouter.delete(
   }),
 );
 
-yukiRouter.get(
+ledgerRouter.get(
   "/connection",
   requireAuth,
   requireScope,
@@ -151,7 +151,7 @@ yukiRouter.get(
  * (no credentials). Filtered to the entities the user can actually reach
  * (workspace / group / entity memberships; platform admins see all).
  */
-yukiRouter.get(
+ledgerRouter.get(
   "/connections",
   requireAuth,
   requireScope,
@@ -195,7 +195,7 @@ yukiRouter.get(
  * to the administrations the user can reach. Rolls up the API Usage Ledger so an
  * admin sees call volume + how close each koppeling is to its limit.
  */
-yukiRouter.get(
+ledgerRouter.get(
   "/usage",
   requireAuth,
   requireScope,
@@ -222,7 +222,7 @@ yukiRouter.get(
   }),
 );
 
-yukiRouter.get(
+ledgerRouter.get(
   "/test-connection",
   requireAuth,
   requireScope,
@@ -250,7 +250,7 @@ const DateRangeQuery = z.object({
   refresh: z.string().optional(),
 });
 
-yukiRouter.get(
+ledgerRouter.get(
   "/trial-balance",
   requireAuth,
   requireScope,
@@ -265,7 +265,7 @@ yukiRouter.get(
   }),
 );
 
-yukiRouter.get(
+ledgerRouter.get(
   "/transactions",
   requireAuth,
   requireScope,
@@ -306,7 +306,7 @@ const OutstandingQuery = z.object({
   refresh: z.string().optional(),
 });
 
-yukiRouter.get(
+ledgerRouter.get(
   "/outstanding",
   requireAuth,
   requireScope,
@@ -321,7 +321,7 @@ yukiRouter.get(
 
 const PdfQuery = z.object({ ref: z.string().min(1) });
 
-yukiRouter.get(
+ledgerRouter.get(
   "/invoice-pdf",
   requireAuth,
   requireScope,
@@ -339,7 +339,7 @@ yukiRouter.get(
   }),
 );
 
-yukiRouter.get(
+ledgerRouter.get(
   "/debtors",
   requireAuth,
   requireScope,
@@ -350,7 +350,7 @@ yukiRouter.get(
   }),
 );
 
-yukiRouter.get(
+ledgerRouter.get(
   "/creditors",
   requireAuth,
   requireScope,

@@ -90,7 +90,7 @@ export function YukiPage() {
     }
     void (async () => {
       try {
-        const r = await api<{ connection: ConnectionInfo | null }>("/api/yuki/connection");
+        const r = await api<{ connection: ConnectionInfo | null }>("/api/ledger/connection");
         setConn(r.connection);
         setEditing(!r.connection); // no connection → open the form straight away
         if (r.connection) setKind(r.connection.kind === "EBOEKHOUDEN" ? "eboekhouden" : "yuki");
@@ -103,7 +103,7 @@ export function YukiPage() {
   // Workspace overview.
   const loadAll = async () => {
     try {
-      const r = await api<{ connections: WorkspaceConn[] }>("/api/yuki/connections");
+      const r = await api<{ connections: WorkspaceConn[] }>("/api/ledger/connections");
       setAll(r.connections);
     } catch (e) {
       setErr(e instanceof ApiError ? e.message : "Kon koppelingen niet laden");
@@ -123,7 +123,7 @@ export function YukiPage() {
         kind === "yuki"
           ? { kind, accessKey: form.accessKey, administrationId: form.administrationId, environment: form.environment }
           : { kind, accessToken: form.accessToken };
-      const saved = await api<{ administrationName: string | null }>("/api/yuki/connection", {
+      const saved = await api<{ administrationName: string | null }>("/api/ledger/connection", {
         method: "PUT",
         body,
       });
@@ -133,7 +133,7 @@ export function YukiPage() {
           : "Koppeling opgeslagen",
       );
       setForm({ ...form, accessKey: "", accessToken: "" });
-      const r = await api<{ connection: ConnectionInfo | null }>("/api/yuki/connection");
+      const r = await api<{ connection: ConnectionInfo | null }>("/api/ledger/connection");
       setConn(r.connection);
       setEditing(false);
       await reload();
@@ -149,7 +149,7 @@ export function YukiPage() {
     setErr(null);
     setTesting(true);
     try {
-      setTest(await api<TestResult>("/api/yuki/test-connection"));
+      setTest(await api<TestResult>("/api/ledger/test-connection"));
     } catch (e) {
       setErr(e instanceof ApiError ? e.message : "Test mislukt");
     } finally {
@@ -159,7 +159,7 @@ export function YukiPage() {
 
   const disconnect = async () => {
     if (!confirm("Koppeling loskoppelen?")) return;
-    await api("/api/yuki/connection", { method: "DELETE" });
+    await api("/api/ledger/connection", { method: "DELETE" });
     setConn(null);
     setEditing(true);
   };

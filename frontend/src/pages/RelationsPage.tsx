@@ -28,12 +28,12 @@ export function RelationsView({ mode }: { mode: Mode }) {
 
   const debtorsQ = useQuery({
     queryKey: ["debtors", entity?.id],
-    queryFn: () => api<{ contacts: Contact[] }>("/api/yuki/debtors"),
+    queryFn: () => api<{ contacts: Contact[] }>("/api/ledger/debtors"),
     enabled: !!entity && wantDebtors,
   });
   const creditorsQ = useQuery({
     queryKey: ["creditors", entity?.id],
-    queryFn: () => api<{ contacts: Contact[] }>("/api/yuki/creditors"),
+    queryFn: () => api<{ contacts: Contact[] }>("/api/ledger/creditors"),
     enabled: !!entity && wantCreditors,
   });
 

@@ -2,7 +2,7 @@ import { useState } from "react";
 import { api } from "../services/api";
 
 /**
- * Shared invoice-PDF modal. `open(ref, name)` fetches `/api/yuki/invoice-pdf`
+ * Shared invoice-PDF modal. `open(ref, name)` fetches `/api/ledger/invoice-pdf`
  * for the given opaque connector ref and shows it in an overlay; `element` is
  * the modal (render it once near the page root). Used by both the
  * receivables/payables view and the transactions table.
@@ -18,7 +18,7 @@ export function usePdfModal() {
     setLoading(true);
     try {
       const res = await api<Response>(
-        `/api/yuki/invoice-pdf?ref=${encodeURIComponent(ref)}`,
+        `/api/ledger/invoice-pdf?ref=${encodeURIComponent(ref)}`,
         { raw: true },
       );
       if (!res.ok) {

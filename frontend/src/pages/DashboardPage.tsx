@@ -207,7 +207,7 @@ export function DashboardPage() {
 
   const { data: connResp } = useQuery({
     queryKey: ["connection", entity?.id],
-    queryFn: () => api<{ connection: unknown | null }>("/api/yuki/connection"),
+    queryFn: () => api<{ connection: unknown | null }>("/api/ledger/connection"),
     enabled: !!entity,
   });
   const connected = connResp?.connection != null;

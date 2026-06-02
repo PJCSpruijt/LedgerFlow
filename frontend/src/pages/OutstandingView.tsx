@@ -57,7 +57,7 @@ export function OutstandingView({ kind }: { kind: "debtor" | "creditor" }) {
 
   const { data, isLoading, isError, error } = useQuery({
     queryKey: ["outstanding", kind, entity?.id],
-    queryFn: () => api<{ items: Item[] }>(`/api/yuki/outstanding?type=${kind}`),
+    queryFn: () => api<{ items: Item[] }>(`/api/ledger/outstanding?type=${kind}`),
     enabled: !!entity,
   });
 

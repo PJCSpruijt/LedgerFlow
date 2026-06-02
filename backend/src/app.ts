@@ -14,7 +14,7 @@ import { enforceTwoFactorEnrollment } from "./middleware/auth.js";
 import { healthRouter } from "./routes/health.js";
 import { authRouter } from "./routes/auth.js";
 import { workspaceRouter } from "./routes/workspaces.js";
-import { yukiRouter } from "./routes/yuki.js";
+import { ledgerRouter } from "./routes/ledger.js";
 import { exportRouter } from "./routes/export.js";
 import { billingRouter, stripeWebhookRouter } from "./routes/billing.js";
 import { adminRouter } from "./routes/admin.js";
@@ -84,7 +84,11 @@ export function createApp() {
   app.use("/api", enforceTwoFactorEnrollment);
   app.use("/api/workspaces", workspaceRouter);
   app.use("/api/api-keys", apiKeysRouter);
-  app.use("/api/yuki", yukiRouter);
+  // Connector-neutral ledger API (serves Yuki, e-Boekhouden, … via the registry).
+  app.use("/api/ledger", ledgerRouter);
+  // Deprecated alias — kept temporarily so cached clients keep working; remove
+  // once all callers use /api/ledger.
+  app.use("/api/yuki", ledgerRouter);
   app.use("/api/export", exportRouter);
   app.use("/api/billing", billingRouter);
   app.use("/api/admin", adminRouter);

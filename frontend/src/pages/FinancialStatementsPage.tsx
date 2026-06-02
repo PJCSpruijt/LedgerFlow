@@ -47,7 +47,7 @@ function SingleEntityStatements() {
       const f = forceRef.current;
       forceRef.current = false;
       return api<{ rows: TbLine[]; cachedAt?: string | null }>(
-        `/api/yuki/trial-balance?from=${range.from}&to=${range.to}${f ? "&refresh=1" : ""}`,
+        `/api/ledger/trial-balance?from=${range.from}&to=${range.to}${f ? "&refresh=1" : ""}`,
       );
     },
     enabled: !!entity,

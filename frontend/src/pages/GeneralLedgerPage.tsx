@@ -51,7 +51,7 @@ export function GeneralLedgerPage() {
 
   const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ["trial-balance", entity?.id, range.from, range.to],
-    queryFn: () => api<{ rows: TbLine[] }>(`/api/yuki/trial-balance?from=${range.from}&to=${range.to}`),
+    queryFn: () => api<{ rows: TbLine[] }>(`/api/ledger/trial-balance?from=${range.from}&to=${range.to}`),
     enabled: !!entity,
   });
 

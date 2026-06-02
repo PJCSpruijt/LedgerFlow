@@ -48,7 +48,7 @@ export function ConnectionUsagePanel() {
 
   const { data, isLoading, isError } = useQuery({
     queryKey: ["connection-usage", workspace?.id, group?.id, entity?.id, days],
-    queryFn: () => api<UsageResult>(`/api/yuki/usage?days=${days}`),
+    queryFn: () => api<UsageResult>(`/api/ledger/usage?days=${days}`),
     enabled: !!workspace,
     refetchInterval: 60_000,
   });
