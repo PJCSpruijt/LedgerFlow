@@ -54,13 +54,19 @@ export function AppShell() {
   };
 
   const isPlatformAdmin = user?.platformRole === "PLATFORM_ADMIN";
+  // Effective scoped role for menu gating: deepest selected level wins, but the
+  // backend cascades a higher role down, so a workspace admin reads as admin at
+  // every level. Platform admin bypasses all role gates.
+  const navRole = entity?.role ?? group?.role ?? workspace?.role ?? null;
+  const roleOk = (roles?: SubPage["roles"]) => !roles || isPlatformAdmin || (navRole != null && roles.includes(navRole));
   // Not-yet-operational (scaffold) subpages are hidden from the navigation for
-  // everyone — including platform admins — until they're actually built.
-  const visibleSubpages = (m: ModuleDef): SubPage[] => m.subpages.filter((sp) => !isScaffold(sp));
+  // everyone — including platform admins — until they're actually built. Subpages
+  // gated to a role are hidden unless the user holds it.
+  const visibleSubpages = (m: ModuleDef): SubPage[] => m.subpages.filter((sp) => !isScaffold(sp) && roleOk(sp.roles));
   // Modules the user may reach (for routing + sub-nav), incl. hidden ones.
-  // A module with only scaffold subpages is hidden from non-admins entirely.
+  // A module with only scaffold/role-gated subpages is hidden entirely.
   const accessibleModules = MODULES.filter(
-    (m) => (!m.platformAdminOnly || isPlatformAdmin) && visibleSubpages(m).length > 0,
+    (m) => (!m.platformAdminOnly || isPlatformAdmin) && roleOk(m.roles) && visibleSubpages(m).length > 0,
   );
   // Sidebar split: regular modules at the top, pinned ones (Platform Admin) at
   // the bottom; modules flagged hideFromSidebar (Instellingen) live in the user menu.

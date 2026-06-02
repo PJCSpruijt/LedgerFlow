@@ -1,5 +1,7 @@
 import type { ReactElement } from "react";
+import type { ScopedRole } from "../contexts/ScopeContext";
 import { DashboardPage } from "../pages/DashboardPage";
+import { TeamPage } from "../pages/TeamPage";
 import { YukiPage } from "../pages/YukiPage";
 import { ExportsPage } from "../pages/ExportsPage";
 import { VatMappingPage } from "../pages/VatMappingPage";
@@ -40,7 +42,13 @@ export interface SubPage {
   path: string;
   label: string;
   element: ReactElement;
+  /** When set, only users with one of these scoped roles see this subpage
+   *  (platform admin always sees everything). */
+  roles?: ScopedRole[];
 }
+
+/** Scoped roles that count as a workspace administrator. */
+export const ADMIN_ROLES: ScopedRole[] = ["WORKSPACE_ADMIN", "ACCOUNTANT_ADMIN", "CLIENT_ADMIN"];
 
 export interface ModuleDef {
   key: string;
@@ -50,6 +58,9 @@ export interface ModuleDef {
   /** Emoji icon placeholder until a proper icon set is wired. */
   icon: string;
   platformAdminOnly?: boolean;
+  /** When set, only users with one of these scoped roles see this module
+   *  (platform admin always sees everything). */
+  roles?: ScopedRole[];
   /** Hidden from the main sidebar (reached via the user menu instead). */
   hideFromSidebar?: boolean;
   /** Pinned to the bottom of the sidebar (e.g. Platform Admin). */
@@ -160,9 +171,10 @@ export const MODULES: ModuleDef[] = [
     icon: "⚙️",
     hideFromSidebar: true,
     subpages: [
-      { path: "settings", label: "Algemeen", element: <SettingsPage /> },
-      { path: "rgs", label: "RGS / normalisatie", element: <RgsSettingsPage /> },
-      { path: "billing", label: "Facturatie & abonnement", element: <BillingPage /> },
+      { path: "settings", label: "Algemeen", element: <SettingsPage />, roles: ADMIN_ROLES },
+      { path: "team", label: "Gebruikers & rollen", element: <TeamPage />, roles: ADMIN_ROLES },
+      { path: "rgs", label: "RGS / normalisatie", element: <RgsSettingsPage />, roles: ADMIN_ROLES },
+      { path: "billing", label: "Facturatie & abonnement", element: <BillingPage />, roles: ADMIN_ROLES },
       { path: "notifications", label: "Meldingen", element: soon("Meldingen") },
       { path: "security", label: "Beveiliging", element: soon("Beveiliging") },
     ],

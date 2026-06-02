@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
+import { isAdminRole, useScope } from "../contexts/ScopeContext";
 import { api, ApiError } from "../services/api";
 
 /** Read an image file and re-encode it as a small square JPEG data URL. */
@@ -57,6 +58,10 @@ const STATUS_LABELS: Record<string, string> = {
  */
 export function UserMenu({ onStartTour }: { onStartTour?: () => void } = {}) {
   const { user, logout, refreshUser } = useAuth();
+  const { workspace, group, entity } = useScope();
+  // Workspace-admin (or platform admin) sees the management links.
+  const isAdmin =
+    user?.platformRole === "PLATFORM_ADMIN" || isAdminRole(entity?.role ?? group?.role ?? workspace?.role);
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   const [sub, setSub] = useState<Subscription | null>(null);
@@ -204,18 +209,28 @@ export function UserMenu({ onStartTour }: { onStartTour?: () => void } = {}) {
                 🧭 Rondleiding
               </button>
             )}
-            <button
-              className="w-full text-left px-4 py-2 text-slate-700 hover:bg-slate-50"
-              onClick={() => go("/administration/settings")}
-            >
-              ⚙️ Instellingen
-            </button>
-            <button
-              className="w-full text-left px-4 py-2 text-slate-700 hover:bg-slate-50"
-              onClick={() => go("/administration/billing")}
-            >
-              💳 Facturatie & abonnement
-            </button>
+            {isAdmin && (
+              <>
+                <button
+                  className="w-full text-left px-4 py-2 text-slate-700 hover:bg-slate-50"
+                  onClick={() => go("/administration/settings")}
+                >
+                  ⚙️ Instellingen
+                </button>
+                <button
+                  className="w-full text-left px-4 py-2 text-slate-700 hover:bg-slate-50"
+                  onClick={() => go("/administration/team")}
+                >
+                  👥 Gebruikers & rollen
+                </button>
+                <button
+                  className="w-full text-left px-4 py-2 text-slate-700 hover:bg-slate-50"
+                  onClick={() => go("/administration/billing")}
+                >
+                  💳 Facturatie & abonnement
+                </button>
+              </>
+            )}
           </nav>
           <div className="border-t border-slate-100 py-1">
             <button
