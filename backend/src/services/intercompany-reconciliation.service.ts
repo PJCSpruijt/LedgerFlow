@@ -5,6 +5,7 @@ import { getIntercompanyRelations, normName } from "./intercompany.service.js";
 import { cachedTrialBalance, cachedTransactions, cachedOutstanding } from "./connector-cache.service.js";
 import { convert, prefetchRates } from "./fx.service.js";
 import { buildEliminationResolver } from "./elimination-mapping.service.js";
+import { isRateLimitError } from "../utils/errors.js";
 
 /**
  * Intercompany reconciliation / mismatch engine (consolidation Fase 2).
@@ -124,7 +125,7 @@ export interface ReconResult {
   to: string;
   currency: string;
   tolerance: number;
-  entities: { id: string; name: string; included: boolean; reason?: string }[];
+  entities: { id: string; name: string; included: boolean; reason?: string; rateLimited?: boolean }[];
   pairs: ReconPairResult[];
   rows: ReconRow[];
   summary: { matched: number; oneSided: number; mismatched: number };
@@ -207,7 +208,7 @@ export async function reconcileIntercompany(input: {
       creOpen = creRes.data;
       for (const r of [tbRes, txRes, debRes, creRes]) if (!lastFetchedAt || r.fetchedAt > lastFetchedAt) lastFetchedAt = r.fetchedAt;
     } catch (e) {
-      status.push({ id: ent.id, name: ent.name, included: false, reason: e instanceof Error ? e.message : "Ophalen mislukt" });
+      status.push({ id: ent.id, name: ent.name, included: false, reason: e instanceof Error ? e.message : "Ophalen mislukt", rateLimited: isRateLimitError(e) });
       continue;
     }
     status.push({ id: ent.id, name: ent.name, included: true });
@@ -403,7 +404,9 @@ export async function reconcileIntercompany(input: {
     }))
     .sort((a, b) => a.category.localeCompare(b.category) || a.entityName.localeCompare(b.entityName) || a.accountCode.localeCompare(b.accountCode));
 
-  if (status.some((s) => !s.included)) warnings.push("Niet alle administraties konden worden geladen.");
+  const limited = status.filter((s) => s.rateLimited);
+  if (limited.length > 0) warnings.push(`Daglimiet van de koppeling bereikt voor ${limited.map((s) => s.name).join(", ")}; reconciliatie tijdelijk onvolledig.`);
+  else if (status.some((s) => !s.included)) warnings.push("Niet alle administraties konden worden geladen.");
 
   return {
     from,

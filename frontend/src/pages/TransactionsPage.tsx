@@ -2,9 +2,10 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useScope } from "../contexts/ScopeContext";
-import { api, ApiError } from "../services/api";
+import { api } from "../services/api";
 import { formatMoney } from "../lib/period";
 import { usePdfModal } from "../components/PdfModal";
+import { ErrorNotice } from "../components/ErrorNotice";
 import { ExportButtons } from "../components/ExportButtons";
 import { CacheBar } from "../components/CacheBar";
 
@@ -523,11 +524,7 @@ export function TransactionsPage() {
 
       {!entity && <div className="lf-card max-w-2xl">Selecteer een administratie in de bovenbalk.</div>}
       {entity && isLoading && <div className="lf-card">Transacties laden…</div>}
-      {isError && (
-        <div className="lf-card text-sm text-red-600">
-          {error instanceof ApiError ? error.message : "Kon transacties niet laden"}
-        </div>
-      )}
+      {isError && <ErrorNotice error={error} fallback="Kon transacties niet laden" onRetry={refresh} />}
 
       {entity && data && (
         <div className="lf-card p-0">

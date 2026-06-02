@@ -10,18 +10,25 @@ import { logger } from "../config/logger.js";
  */
 export const errorHandler: ErrorRequestHandler = (err, _req, res, _next) => {
   if (err instanceof AppError) {
-    // ConnectorError.details carry raw upstream (Yuki) response snippets/faults —
-    // useful in logs, never safe to return to the client. Log them, strip them
-    // from the HTTP body.
-    if (err instanceof ConnectorError && err.details !== undefined) {
-      logger.warn({ code: err.code, details: err.details }, err.message);
+    if (err instanceof ConnectorError) {
+      // ConnectorError.details carry raw upstream (Yuki) snippets/faults — useful
+      // in logs, never safe to return. Expose ONLY the safe, actionable fields so
+      // the UI can tell a temporary daily-limit (rateLimited) from a hard error.
+      if (err.details !== undefined) logger.warn({ code: err.code, details: err.details }, err.message);
+      res.status(err.status).json({
+        error: {
+          code: err.code,
+          message: err.message,
+          details: { rateLimited: err.rateLimited, connector: err.connector },
+        },
+      });
+      return;
     }
-    const exposeDetails = !(err instanceof ConnectorError);
     res.status(err.status).json({
       error: {
         code: err.code,
         message: err.message,
-        details: exposeDetails ? (err.details ?? undefined) : undefined,
+        details: err.details ?? undefined,
       },
     });
     return;

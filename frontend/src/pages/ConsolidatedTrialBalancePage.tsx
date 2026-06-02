@@ -1,9 +1,10 @@
 import { Fragment, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useScope } from "../contexts/ScopeContext";
-import { api, ApiError } from "../services/api";
+import { api } from "../services/api";
 import { formatMoney } from "../lib/period";
 import { ExportButtons } from "../components/ExportButtons";
+import { ErrorNotice } from "../components/ErrorNotice";
 import { CacheBar } from "../components/CacheBar";
 
 interface EntityAmount {
@@ -197,9 +198,7 @@ export function ConsolidatedTrialBalancePage() {
 
       {!workspace && <div className="lf-card max-w-2xl">Selecteer een werkruimte in de bovenbalk.</div>}
       {workspace && isLoading && <div className="lf-card">Consolidatie laden…</div>}
-      {isError && (
-        <div className="lf-card text-sm text-red-600">{error instanceof ApiError ? error.message : "Kon consolidatie niet laden"}</div>
-      )}
+      {isError && <ErrorNotice error={error} fallback="Kon consolidatie niet laden" onRetry={refresh} />}
 
       {data && showElim && data.imbalances.length > 0 && (
         <div className="lf-card bg-rose-50 ring-rose-200 text-rose-900 text-sm space-y-1">

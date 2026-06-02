@@ -1,9 +1,10 @@
 import { useRef, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useScope } from "../contexts/ScopeContext";
-import { api, ApiError } from "../services/api";
+import { api } from "../services/api";
 import { formatMoney } from "../lib/period";
 import { CacheBar } from "../components/CacheBar";
+import { ErrorNotice } from "../components/ErrorNotice";
 
 type ElimCategory = "EQUITY_INVESTMENT" | "CURRENT_ACCOUNT" | "LOAN";
 
@@ -125,9 +126,7 @@ export function EliminationMappingPage() {
 
       {!workspace && <div className="lf-card max-w-2xl">Selecteer een werkruimte in de bovenbalk.</div>}
       {workspace && isLoading && <div className="lf-card">Rekeningen laden… (proefbalansen worden opgehaald)</div>}
-      {isError && (
-        <div className="lf-card text-sm text-red-600">{error instanceof ApiError ? error.message : "Kon rekeningen niet laden"}</div>
-      )}
+      {isError && <ErrorNotice error={error} fallback="Kon rekeningen niet laden" onRetry={refresh} />}
 
       {data && (
         <div className="flex items-center gap-4 flex-wrap text-sm">

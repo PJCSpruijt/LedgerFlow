@@ -6,6 +6,7 @@ import { cachedTrialBalance, cachedTransactions, cachedOutstanding } from "./con
 import { getIntercompanyRelations, getIntercompanyMap, normName } from "./intercompany.service.js";
 import { isIntragroupCode } from "./consolidation.service.js";
 import { convert, prefetchRates } from "./fx.service.js";
+import { isRateLimitError } from "../utils/errors.js";
 
 /**
  * Dashboard KPIs, consolidated across the scope (group or workspace) with
@@ -27,7 +28,7 @@ export interface DashboardKpis {
   from: string;
   to: string;
   currency: string;
-  entities: { id: string; name: string; included: boolean; reason?: string }[];
+  entities: { id: string; name: string; included: boolean; reason?: string; rateLimited?: boolean }[];
   /** Always 12 months (Jan–Dec) of the reporting year + a previous-year line. */
   revenueByMonth: MonthRevenue[];
   revenueYear: number;
@@ -146,7 +147,7 @@ export async function computeDashboardKpis(input: DashboardInput): Promise<Dashb
         cre = creRes.data;
         for (const r of [tbRes, txRes, debRes, creRes]) if (!fetched.at || r.fetchedAt > fetched.at) fetched.at = r.fetchedAt;
       } catch (e) {
-        status.push({ id: ent.id, name: ent.name, included: false, reason: e instanceof Error ? e.message : "Ophalen mislukt" });
+        status.push({ id: ent.id, name: ent.name, included: false, reason: e instanceof Error ? e.message : "Ophalen mislukt", rateLimited: isRateLimitError(e) });
         return;
       }
       status.push({ id: ent.id, name: ent.name, included: true });
@@ -250,7 +251,12 @@ export async function computeDashboardKpis(input: DashboardInput): Promise<Dashb
   if (unmappedBalance) {
     warnings.push("Sommige balansrekeningen zijn nog niet aan RGS gekoppeld; werkkapitaal kan onvolledig zijn.");
   }
-  if (status.some((s) => !s.included)) {
+  const limited = status.filter((s) => s.rateLimited);
+  if (limited.length > 0) {
+    warnings.push(
+      `Daglimiet van de koppeling bereikt voor ${limited.map((s) => s.name).join(", ")}; cijfers tijdelijk onvolledig.`,
+    );
+  } else if (status.some((s) => !s.included)) {
     warnings.push("Niet alle administraties konden worden geladen.");
   }
 

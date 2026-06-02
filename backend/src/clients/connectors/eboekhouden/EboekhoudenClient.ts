@@ -2,6 +2,7 @@ import { ConnectorError } from "../../../utils/errors.js";
 import { logger } from "../../../config/logger.js";
 import type { ConnectorContext } from "../context.js";
 import { classifyOperation, logApiUsage, sha256 } from "../../../services/api-usage.service.js";
+import { withRetry } from "../retry.js";
 
 /**
  * Low-level transport for the e-Boekhouden REST API (https://api.e-boekhouden.nl).
@@ -100,13 +101,14 @@ export class EboekhoudenClient {
     let retryCount = 0;
 
     let token = await this.session();
-    let res = await fetch(url, { headers: { Authorization: token } });
+    // Retry only transient network failures; a 429/daily-limit is handled below.
+    let res = await withRetry(() => fetch(url, { headers: { Authorization: token } }), { label: `e-Boekhouden GET ${path}` });
     if (res.status === 401) {
       // Token may have expired early — re-auth once.
       retryCount = 1;
       this.token = undefined;
       token = await this.session();
-      res = await fetch(url, { headers: { Authorization: token } });
+      res = await withRetry(() => fetch(url, { headers: { Authorization: token } }), { label: `e-Boekhouden GET ${path}` });
     }
     const text = await res.text();
     const records = (() => {

@@ -7,6 +7,7 @@ import { getAdjustmentLeaves } from "./consolidation-adjustment.service.js";
 import { cachedTrialBalance, cachedTransactions } from "./connector-cache.service.js";
 import { convert, prefetchRates } from "./fx.service.js";
 import { buildEliminationResolver } from "./elimination-mapping.service.js";
+import { isRateLimitError } from "../utils/errors.js";
 
 /**
  * Consolidation (RGS-B). Aggregates the trial balances of every administration
@@ -45,6 +46,8 @@ export interface ConsolEntityStatus {
   included: boolean;
   /** Why an entity was left out (no connection, fetch error, no mappings…). */
   reason?: string;
+  /** True when the entity dropped out due to a TEMPORARY connector rate limit. */
+  rateLimited?: boolean;
 }
 
 /** One consolidated leaf line, keyed by RGS code (or per-entity when unmapped). */
@@ -161,6 +164,7 @@ export async function consolidate(input: ConsolidationInput): Promise<Consolidat
           groupId: ent.groupId,
           included: false,
           reason: e instanceof Error ? e.message : "Ophalen mislukt",
+          rateLimited: isRateLimitError(e),
         });
         return null;
       }
@@ -231,6 +235,13 @@ export async function consolidate(input: ConsolidationInput): Promise<Consolidat
   }
   if (loaded.length === 0) {
     warnings.push("Geen enkele administratie in deze scope kon worden geladen.");
+  }
+  const limited = status.filter((s) => s.rateLimited);
+  if (limited.length > 0) {
+    warnings.push(
+      `Daglimiet van de koppeling bereikt voor ${limited.map((s) => s.entityName).join(", ")}. ` +
+        "Deze cijfers zijn tijdelijk onvolledig; de limiet reset dagelijks of probeer later opnieuw.",
+    );
   }
 
   // Intercompany elimination (optional): net out mutual balances per account.

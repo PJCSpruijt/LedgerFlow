@@ -2,9 +2,10 @@ import { Fragment, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { useScope } from "../contexts/ScopeContext";
-import { api, ApiError } from "../services/api";
+import { api } from "../services/api";
 import { formatMoney } from "../lib/period";
 import { ExportButtons } from "../components/ExportButtons";
+import { ErrorNotice } from "../components/ErrorNotice";
 
 interface TbLine {
   glAccountCode: string;
@@ -48,7 +49,7 @@ export function GeneralLedgerPage() {
   const [filters, setFilters] = useState({ codeFrom: "", codeTo: "", name: "", type: "" });
   const filterActive = !!(filters.codeFrom || filters.codeTo || filters.name || filters.type);
 
-  const { data, isLoading, isError, error } = useQuery({
+  const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ["trial-balance", entity?.id, range.from, range.to],
     queryFn: () => api<{ rows: TbLine[] }>(`/api/yuki/trial-balance?from=${range.from}&to=${range.to}`),
     enabled: !!entity,
@@ -220,11 +221,7 @@ export function GeneralLedgerPage() {
 
       {!entity && <div className="lf-card max-w-2xl">Selecteer een administratie in de bovenbalk.</div>}
       {entity && isLoading && <div className="lf-card">Proefbalans laden…</div>}
-      {isError && (
-        <div className="lf-card text-sm text-red-600">
-          {error instanceof ApiError ? error.message : "Kon proefbalans niet laden"}
-        </div>
-      )}
+      {isError && <ErrorNotice error={error} fallback="Kon proefbalans niet laden" onRetry={() => refetch()} />}
 
       {entity && data && (
         <div className="lf-card p-0">

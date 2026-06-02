@@ -1,9 +1,10 @@
 import { Fragment, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useScope } from "../contexts/ScopeContext";
-import { api, ApiError } from "../services/api";
+import { api } from "../services/api";
 import { formatMoney } from "../lib/period";
 import { ExportButtons } from "../components/ExportButtons";
+import { ErrorNotice } from "../components/ErrorNotice";
 import { CacheBar } from "../components/CacheBar";
 import { categorize, display, type Cat, type StmtLine } from "../lib/rgsPresentation";
 
@@ -50,7 +51,7 @@ export interface ConsolResult {
   rgsEnabled: boolean;
   groupId: string | null;
   groupName: string | null;
-  entities: { entityId: string; entityName: string; included: boolean; reason?: string }[];
+  entities: { entityId: string; entityName: string; included: boolean; reason?: string; rateLimited?: boolean }[];
   includedEntities: { id: string; name: string }[];
   leaves: RawLeaf[];
   eliminations: RawLeaf[];
@@ -291,8 +292,15 @@ export function ConsolidatedStatementsPage({
             <span
               key={e.entityId}
               title={e.included ? "Meegeconsolideerd" : `Niet meegenomen: ${e.reason ?? "onbekend"}`}
-              className={`px-2 py-0.5 rounded-full ${e.included ? "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200" : "bg-slate-100 text-slate-400 line-through"}`}
+              className={`px-2 py-0.5 rounded-full ${
+                e.included
+                  ? "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200"
+                  : e.rateLimited
+                    ? "bg-amber-50 text-amber-800 ring-1 ring-amber-200"
+                    : "bg-slate-100 text-slate-400 line-through"
+              }`}
             >
+              {e.rateLimited && !e.included ? "⏳ " : ""}
               {e.entityName}
             </span>
           ))}
@@ -301,9 +309,7 @@ export function ConsolidatedStatementsPage({
 
       {showSelectHint && <div className="lf-card max-w-2xl">Selecteer een werkruimte in de bovenbalk.</div>}
       {isLoading && <div className="lf-card">Consolidatie laden… (administraties worden parallel opgehaald)</div>}
-      {isError && (
-        <div className="lf-card text-sm text-red-600">{error instanceof ApiError ? error.message : "Kon consolidatie niet laden"}</div>
-      )}
+      {isError && <ErrorNotice error={error} fallback="Kon consolidatie niet laden" onRetry={refresh} />}
 
       {/* Elimination mode + intercompany hints */}
       {data && eliminate && (

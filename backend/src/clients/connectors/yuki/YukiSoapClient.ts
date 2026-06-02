@@ -4,6 +4,7 @@ import { ConnectorError } from "../../../utils/errors.js";
 import { logger } from "../../../config/logger.js";
 import type { ConnectorContext } from "../context.js";
 import { classifyOperation, logApiUsage, sha256 } from "../../../services/api-usage.service.js";
+import { withRetry } from "../retry.js";
 
 /**
  * Low-level Yuki SOAP transport.
@@ -105,18 +106,25 @@ export class YukiSoapClient {
     );
 
     const startedAt = new Date();
-    const { statusCode, body } = await request(url, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/soap+xml; charset=utf-8",
-        SOAPAction: `${NAMESPACE}${opts.method}`,
-      },
-      body: envelope,
-      // Yuki can be slow for chunks covering high-activity months — bump from undici's
-      // default 30s to 60s before declaring the request dead.
-      bodyTimeout: opts.timeoutMs ?? 60_000,
-      headersTimeout: opts.timeoutMs ?? 60_000,
-    });
+    // Retry only transient network failures (timeouts/resets) — never an HTTP
+    // status: Yuki returns its daily-limit fault as HTTP 500, so retrying a
+    // response would waste the quota. Daily limit fails fast (handled below).
+    const { statusCode, body } = await withRetry(
+      () =>
+        request(url, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/soap+xml; charset=utf-8",
+            SOAPAction: `${NAMESPACE}${opts.method}`,
+          },
+          body: envelope,
+          // Yuki can be slow for chunks covering high-activity months — bump from undici's
+          // default 30s to 60s before declaring the request dead.
+          bodyTimeout: opts.timeoutMs ?? 60_000,
+          headersTimeout: opts.timeoutMs ?? 60_000,
+        }),
+      { label: `Yuki ${opts.service}.${opts.method}` },
+    );
 
     const text = await body.text();
 

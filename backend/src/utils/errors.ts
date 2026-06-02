@@ -17,6 +17,11 @@ export class AppError extends Error {
   }
 }
 
+/** True when a caught error is a connector rate-limit (temporary) failure. */
+export function isRateLimitError(e: unknown): boolean {
+  return e instanceof ConnectorError && e.rateLimited;
+}
+
 export class BadRequestError extends AppError {
   constructor(message = "Bad request", details?: unknown) {
     super(400, "BAD_REQUEST", message, details);
@@ -75,8 +80,27 @@ export class TwoFactorEnrollmentRequiredError extends AppError {
   }
 }
 
+/**
+ * An upstream accounting connector (Yuki, e-Boekhouden, …) failed. Two flavours:
+ *  - rate-limited (daily/API limit reached) → 429, TEMPORARY: retrying later
+ *    helps, so the UI shows an amber "probeer later opnieuw" notice.
+ *  - everything else (auth, fault, unreachable) → 502, treated as a hard error.
+ * `details` may carry raw upstream snippets (logged, never returned); the safe
+ * `rateLimited` + `connector` fields are surfaced to the client by the handler.
+ */
 export class ConnectorError extends AppError {
-  constructor(message = "Connector error", details?: unknown) {
-    super(502, "CONNECTOR_ERROR", message, details);
+  public readonly rateLimited: boolean;
+  public readonly connector?: string;
+
+  constructor(message = "Connector error", details?: { rateLimited?: boolean; connector?: string; [k: string]: unknown }) {
+    const rateLimited = !!details?.rateLimited;
+    super(
+      rateLimited ? 429 : 502,
+      rateLimited ? "CONNECTOR_RATE_LIMITED" : "CONNECTOR_ERROR",
+      message,
+      details,
+    );
+    this.rateLimited = rateLimited;
+    this.connector = typeof details?.connector === "string" ? details.connector : undefined;
   }
 }

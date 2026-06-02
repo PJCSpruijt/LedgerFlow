@@ -1,10 +1,11 @@
 import { useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useScope } from "../contexts/ScopeContext";
-import { api, ApiError } from "../services/api";
+import { api } from "../services/api";
 import { formatMoney } from "../lib/period";
 import { ExportButtons } from "../components/ExportButtons";
 import { CacheBar } from "../components/CacheBar";
+import { ErrorNotice } from "../components/ErrorNotice";
 
 type Category = "EQUITY_INVESTMENT" | "CURRENT_ACCOUNT" | "LOAN" | "RECEIVABLE_PAYABLE" | "TAX_FISCAL_UNITY" | "REVENUE_COST";
 interface PairResult {
@@ -110,9 +111,7 @@ export function IntercompanyReconciliationPage() {
 
       {!workspace && <div className="lf-card max-w-2xl">Selecteer een werkruimte in de bovenbalk.</div>}
       {workspace && isLoading && <div className="lf-card">Reconciliatie laden… (administraties worden opgehaald)</div>}
-      {isError && (
-        <div className="lf-card text-sm text-red-600">{error instanceof ApiError ? error.message : "Kon reconciliatie niet laden"}</div>
-      )}
+      {isError && <ErrorNotice error={error} fallback="Kon reconciliatie niet laden" onRetry={refresh} />}
 
       {data && (
         <div className="flex flex-wrap gap-3 text-sm">
