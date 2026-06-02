@@ -2,6 +2,7 @@ import type { ReactElement } from "react";
 import type { ScopedRole } from "../contexts/ScopeContext";
 import { DashboardPage } from "../pages/DashboardPage";
 import { TeamPage } from "../pages/TeamPage";
+import { AgingReportPage } from "../pages/AgingReportPage";
 import { YukiPage } from "../pages/YukiPage";
 import { ExportsPage } from "../pages/ExportsPage";
 import { VatMappingPage } from "../pages/VatMappingPage";
@@ -156,7 +157,7 @@ export const MODULES: ModuleDef[] = [
       { path: "management", label: "Managementrapportages", element: soon("Managementrapportages") },
       { path: "cashflow", label: "Kasstroom", element: soon("Kasstroom") },
       { path: "kpi", label: "KPI-dashboards", element: soon("KPI-dashboards") },
-      { path: "aging", label: "Ouderdomsanalyse", element: soon("Ouderdomsanalyse") },
+      { path: "aging", label: "Ouderdomsanalyse", element: <AgingReportPage /> },
       { path: "intercompany", label: "Intercompany-rapportages", element: soon("Intercompany-rapportages") },
       { path: "audit", label: "Auditrapportages", element: soon("Auditrapportages") },
       { path: "scheduled", label: "Geplande exports", element: soon("Geplande exports") },
