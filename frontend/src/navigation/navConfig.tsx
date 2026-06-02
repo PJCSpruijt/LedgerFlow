@@ -5,6 +5,7 @@ import { TeamPage } from "../pages/TeamPage";
 import { AgingReportPage } from "../pages/AgingReportPage";
 import { DataQualityPage } from "../pages/DataQualityPage";
 import { RawExplorerPage } from "../pages/RawExplorerPage";
+import { RgsDefaultsPage } from "../pages/RgsDefaultsPage";
 import { YukiPage } from "../pages/YukiPage";
 import { ExportsPage } from "../pages/ExportsPage";
 import { VatMappingPage } from "../pages/VatMappingPage";
@@ -124,7 +125,7 @@ export const MODULES: ModuleDef[] = [
       { path: "reporting-structures", label: "Rapportagestructuren", element: soon("Rapportagestructuren") },
       { path: "templates", label: "Standaardsjablonen", element: soon("Standaardsjablonen") },
       { path: "overrides", label: "Administratie-uitzonderingen", element: soon("Administratie-uitzonderingen") },
-      { path: "import-export", label: "Import / export", element: soon("Import / export") },
+      { path: "import-export", label: "RGS-standaarden & import/export", element: <RgsDefaultsPage />, roles: ADMIN_ROLES },
       { path: "audit", label: "Wijzigingslog", element: soon("Wijzigingslog") },
     ],
   },

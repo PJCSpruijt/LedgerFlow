@@ -21,6 +21,11 @@ import {
   resolveRgsVersion,
   setMapping,
   suggestForAccounts,
+  getWorkspaceDefaults,
+  setWorkspaceDefault,
+  deleteWorkspaceDefault,
+  exportMappings,
+  importDefaults,
 } from "../services/rgs-mapping.service.js";
 
 export const rgsMappingRouter = Router();
@@ -421,5 +426,92 @@ rgsMappingRouter.get(
     const entityId = requireEntity(req);
     const { code } = req.query as unknown as z.infer<typeof HistoryQuery>;
     res.json({ history: await getMappingHistory(entityId, code) });
+  }),
+);
+
+/* -------------------------------------------------------------------------- */
+/*  Workspace-wide RGS defaults + import / export                            */
+/* -------------------------------------------------------------------------- */
+
+rgsMappingRouter.get(
+  "/defaults",
+  asyncHandler(async (req, res) => {
+    const workspaceId = req.scope!.workspaceId;
+    res.json({
+      version: await resolveRgsVersion(workspaceId),
+      defaults: (await getWorkspaceDefaults(workspaceId)).map((d) => ({
+        sourceAccountCode: d.sourceAccountCode,
+        rgsCode: d.rgsCode,
+        finCategory: d.finCategory ? { id: d.finCategory.id, key: d.finCategory.key, label: d.finCategory.label } : null,
+        updatedAt: d.updatedAt,
+      })),
+    });
+  }),
+);
+
+const SetDefaultBody = z.object({
+  sourceAccountCode: z.string().min(1).max(50),
+  rgsCode: z.string().max(40).nullable().optional(),
+  finCategoryId: z.string().nullable().optional(),
+});
+
+rgsMappingRouter.post(
+  "/defaults",
+  requireScopeRole(...SCOPE_ADMIN_ROLES),
+  validateBody(SetDefaultBody),
+  asyncHandler(async (req, res) => {
+    const b = req.body as z.infer<typeof SetDefaultBody>;
+    const workspaceId = req.scope!.workspaceId;
+    await setWorkspaceDefault({
+      workspaceId,
+      sourceAccountCode: b.sourceAccountCode,
+      rgsVersion: await resolveRgsVersion(workspaceId),
+      rgsCode: b.rgsCode ?? null,
+      finCategoryId: b.finCategoryId ?? null,
+      userId: req.user?.id ?? null,
+    });
+    res.json({ ok: true });
+  }),
+);
+
+const DelDefaultQuery = z.object({ code: z.string().min(1) });
+
+rgsMappingRouter.delete(
+  "/defaults",
+  requireScopeRole(...SCOPE_ADMIN_ROLES),
+  validateQuery(DelDefaultQuery),
+  asyncHandler(async (req, res) => {
+    const { code } = req.query as unknown as z.infer<typeof DelDefaultQuery>;
+    const ok = await deleteWorkspaceDefault(req.scope!.workspaceId, code);
+    res.json({ ok });
+  }),
+);
+
+rgsMappingRouter.get(
+  "/export",
+  asyncHandler(async (req, res) => {
+    res.json(await exportMappings(req.scope!.workspaceId));
+  }),
+);
+
+const ImportBody = z.object({
+  defaults: z
+    .array(
+      z.object({
+        sourceAccountCode: z.string().min(1).max(50),
+        rgsCode: z.string().max(40).nullable().optional(),
+        finCategory: z.string().max(40).nullable().optional(),
+      }),
+    )
+    .max(5000),
+});
+
+rgsMappingRouter.post(
+  "/import",
+  requireScopeRole(...SCOPE_ADMIN_ROLES),
+  validateBody(ImportBody),
+  asyncHandler(async (req, res) => {
+    const b = req.body as z.infer<typeof ImportBody>;
+    res.json(await importDefaults(req.scope!.workspaceId, b.defaults, req.user?.id ?? null));
   }),
 );

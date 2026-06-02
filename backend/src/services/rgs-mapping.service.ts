@@ -56,6 +56,109 @@ export async function getActiveMappings(entityId: string) {
   });
 }
 
+/** Workspace-wide default mappings (inherited unless an entity overrides). */
+export async function getWorkspaceDefaults(workspaceId: string) {
+  return prisma.workspaceAccountDefault.findMany({
+    where: { workspaceId },
+    include: { finCategory: true },
+    orderBy: { sourceAccountCode: "asc" },
+  });
+}
+
+/** Upsert (or clear, when rgsCode and finCategoryId are both null) a default. */
+export async function setWorkspaceDefault(input: {
+  workspaceId: string;
+  sourceAccountCode: string;
+  rgsVersion: string;
+  rgsCode: string | null;
+  finCategoryId: string | null;
+  userId: string | null;
+}) {
+  const { workspaceId, sourceAccountCode } = input;
+  if (!input.rgsCode && !input.finCategoryId) {
+    await prisma.workspaceAccountDefault.deleteMany({ where: { workspaceId, sourceAccountCode } });
+    return { cleared: true };
+  }
+  return prisma.workspaceAccountDefault.upsert({
+    where: { workspaceId_sourceAccountCode: { workspaceId, sourceAccountCode } },
+    create: {
+      workspaceId,
+      sourceAccountCode,
+      rgsVersion: input.rgsVersion,
+      rgsCode: input.rgsCode,
+      finCategoryId: input.finCategoryId,
+      createdByUserId: input.userId,
+    },
+    update: { rgsCode: input.rgsCode, finCategoryId: input.finCategoryId, rgsVersion: input.rgsVersion },
+  });
+}
+
+export async function deleteWorkspaceDefault(workspaceId: string, sourceAccountCode: string): Promise<boolean> {
+  const r = await prisma.workspaceAccountDefault.deleteMany({ where: { workspaceId, sourceAccountCode } });
+  return r.count > 0;
+}
+
+/** Export workspace defaults + every entity's active mappings as a portable doc. */
+export async function exportMappings(workspaceId: string) {
+  const rgsVersion = await resolveRgsVersion(workspaceId);
+  const [defaults, entities] = await Promise.all([
+    getWorkspaceDefaults(workspaceId),
+    prisma.entity.findMany({ where: { group: { workspaceId } }, select: { id: true, name: true }, orderBy: { name: "asc" } }),
+  ]);
+  const entityMaps = await Promise.all(
+    entities.map(async (e) => ({
+      entityId: e.id,
+      entityName: e.name,
+      mappings: (await getActiveMappings(e.id)).map((m) => ({
+        sourceAccountCode: m.sourceAccountCode,
+        rgsCode: m.rgsCode,
+        finCategory: m.finCategory?.key ?? null,
+      })),
+    })),
+  );
+  return {
+    rgsVersion,
+    exportedAt: new Date().toISOString(),
+    defaults: defaults.map((d) => ({ sourceAccountCode: d.sourceAccountCode, rgsCode: d.rgsCode, finCategory: d.finCategory?.key ?? null })),
+    entities: entityMaps,
+  };
+}
+
+/** Bulk import workspace defaults (upsert by sourceAccountCode). finCategory by key. */
+export async function importDefaults(
+  workspaceId: string,
+  rows: { sourceAccountCode: string; rgsCode?: string | null; finCategory?: string | null }[],
+  userId: string | null,
+): Promise<{ imported: number; skipped: number }> {
+  const rgsVersion = await resolveRgsVersion(workspaceId);
+  // Resolve fin-category keys → ids (workspace-specific or platform default).
+  const keys = [...new Set(rows.map((r) => r.finCategory).filter((k): k is string => !!k))];
+  const cats = keys.length
+    ? await prisma.finSemanticCategory.findMany({ where: { key: { in: keys }, OR: [{ workspaceId }, { workspaceId: null }] }, select: { id: true, key: true } })
+    : [];
+  const catByKey = new Map(cats.map((c) => [c.key, c.id]));
+
+  let imported = 0;
+  let skipped = 0;
+  for (const r of rows) {
+    const code = (r.sourceAccountCode ?? "").trim();
+    if (!code || (!r.rgsCode && !r.finCategory)) {
+      skipped += 1;
+      continue;
+    }
+    await setWorkspaceDefault({
+      workspaceId,
+      sourceAccountCode: code,
+      rgsVersion,
+      rgsCode: r.rgsCode?.trim() || null,
+      finCategoryId: r.finCategory ? (catByKey.get(r.finCategory) ?? null) : null,
+      userId,
+    });
+    imported += 1;
+  }
+  return { imported, skipped };
+}
+
 /** Append-only mapping change: supersede the current row, insert the new one. */
 export async function setMapping(input: {
   workspaceId: string;
@@ -216,15 +319,21 @@ export async function applyRgsMappings<T extends TransactionLine | TrialBalanceL
   const settings = await prisma.workspaceSettings.findUnique({ where: { workspaceId } });
   if (!settings?.rgsEnabled) return lines;
 
-  const mappings = await getActiveMappings(entityId);
-  if (mappings.length === 0) return lines;
+  // Resolution = workspace defaults first, then the entity's own mappings on top
+  // (entity-specific always wins). So a code without its own mapping inherits the
+  // workspace default; an explicit entity mapping overrides it.
+  const [entityMappings, defaults] = await Promise.all([getActiveMappings(entityId), getWorkspaceDefaults(workspaceId)]);
+  if (entityMappings.length === 0 && defaults.length === 0) return lines;
+  type Resolved = { rgsCode: string | null; finCategoryKey: string | null };
+  const byCode = new Map<string, Resolved>();
+  for (const d of defaults) byCode.set(d.sourceAccountCode, { rgsCode: d.rgsCode ?? null, finCategoryKey: d.finCategory?.key ?? null });
+  for (const m of entityMappings) byCode.set(m.sourceAccountCode, { rgsCode: m.rgsCode ?? null, finCategoryKey: m.finCategory?.key ?? null });
 
   // Use the effective (loaded) version for taxonomy lookups — the workspace's
   // configured version may not be imported yet (resolveRgsVersion falls back).
   const version = await resolveRgsVersion(workspaceId);
-  const byCode = new Map(mappings.map((m) => [m.sourceAccountCode, m]));
   // Resolve rgsType for the mapped codes in one query.
-  const codes = [...new Set(mappings.map((m) => m.rgsCode).filter((c): c is string => !!c))];
+  const codes = [...new Set([...byCode.values()].map((v) => v.rgsCode).filter((c): c is string => !!c))];
   const rgsRows = codes.length
     ? await prisma.rgsAccount.findMany({
         where: { version, code: { in: codes } },
@@ -254,7 +363,7 @@ export async function applyRgsMappings<T extends TransactionLine | TrialBalanceL
       ...l,
       rgsCode: m.rgsCode ?? null,
       rgsType: m.rgsCode ? (typeByCode.get(m.rgsCode) ?? null) : null,
-      finCategory: m.finCategory?.key ?? null,
+      finCategory: m.finCategoryKey ?? null,
       rgsGroupCode: gc,
       rgsGroupName: g?.description ?? null,
       rgsGroupOrder: g?.referentienummer ?? null,

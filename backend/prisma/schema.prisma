@@ -95,6 +95,7 @@ model Workspace {
   vatMappings  VatMapping[]
   finCategories     FinSemanticCategory[]
   rgsMappings       SourceAccountMapping[]
+  accountDefaults   WorkspaceAccountDefault[]
   settings          WorkspaceSettings?
   apiKeys           ApiKey[]
 }
@@ -506,6 +507,7 @@ model FinSemanticCategory {
 
   workspace Workspace? @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   mappings  SourceAccountMapping[]
+  accountDefaults WorkspaceAccountDefault[]
 
   @@unique([workspaceId, key])
   @@index([workspaceId])
@@ -536,6 +538,28 @@ model SourceAccountMapping {
 
   @@index([workspaceId, entityId, sourceAccountCode, supersededAt])
   @@index([entityId, supersededAt])
+}
+
+// Workspace-wide RGS default mapping per source-account code. An administration
+// inherits the default for a code UNLESS it has its own (entity-specific)
+// SourceAccountMapping, which always wins. Lets one mapping set be reused across
+// all administrations and seeded via import. Mutable (upsert), one row per code.
+model WorkspaceAccountDefault {
+  id                String   @id @default(uuid())
+  workspaceId       String
+  sourceAccountCode String
+  rgsVersion        String   @default("3.5")
+  rgsCode           String?
+  finCategoryId     String?
+  createdByUserId   String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  workspace   Workspace            @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  finCategory FinSemanticCategory? @relation(fields: [finCategoryId], references: [id], onDelete: SetNull)
+
+  @@unique([workspaceId, sourceAccountCode])
+  @@index([workspaceId])
 }
 
 // Per-workspace feature/normalization settings (1:1 with Workspace).
