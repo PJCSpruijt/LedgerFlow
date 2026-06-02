@@ -56,7 +56,7 @@ const STATUS_LABELS: Record<string, string> = {
  * Top-bar account menu: an initials avatar that opens a dropdown with the
  * user's name / e-mail / subscription, a link to Instellingen, and logout.
  */
-export function UserMenu({ onStartTour }: { onStartTour?: () => void } = {}) {
+export function UserMenu({ onStartTour, onReportProblem }: { onStartTour?: () => void; onReportProblem?: () => void } = {}) {
   const { user, logout, refreshUser } = useAuth();
   const { workspace, group, entity } = useScope();
   // Workspace-admin (or platform admin) sees the management links.
@@ -207,6 +207,17 @@ export function UserMenu({ onStartTour }: { onStartTour?: () => void } = {}) {
                 }}
               >
                 🧭 Rondleiding
+              </button>
+            )}
+            {onReportProblem && (
+              <button
+                className="w-full text-left px-4 py-2 text-slate-700 hover:bg-slate-50"
+                onClick={() => {
+                  setOpen(false);
+                  onReportProblem();
+                }}
+              >
+                🐞 Probleem melden
               </button>
             )}
             {isAdmin && (

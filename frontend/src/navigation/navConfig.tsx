@@ -34,6 +34,7 @@ import { AdminPage } from "../pages/AdminPage";
 import { AdminUsersPage } from "../pages/AdminUsersPage";
 import { AdminPlansPage } from "../pages/AdminPlansPage";
 import { AdminStatsPage } from "../pages/AdminStatsPage";
+import { AdminIncidentsPage } from "../pages/AdminIncidentsPage";
 import { Placeholder } from "../pages/Placeholder";
 
 /**
@@ -199,6 +200,7 @@ export const MODULES: ModuleDef[] = [
       { path: "rgs", label: "RGS-taxonomie", element: <RgsTaxonomyPage /> },
       { path: "connector-registry", label: "Connector-register", element: soon("Connector-register") },
       { path: "connector-health", label: "Connector-status", element: soon("Connector-status") },
+      { path: "incidents", label: "Incidenten", element: <AdminIncidentsPage /> },
       { path: "jobs", label: "Achtergrondtaken", element: soon("Achtergrondtaken") },
       { path: "feature-flags", label: "Feature-flags", element: soon("Feature-flags") },
       { path: "system-logs", label: "Systeemlogs", element: soon("Systeemlogs") },

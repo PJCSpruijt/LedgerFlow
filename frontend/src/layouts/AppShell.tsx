@@ -7,6 +7,7 @@ import { MODULES, isScaffold, type ModuleDef, type SubPage } from "../navigation
 import { useContextUrlSync } from "../navigation/useContextUrlSync";
 import { UserMenu } from "../components/UserMenu";
 import { ProductTour } from "../components/ProductTour";
+import { ReportProblemModal } from "../components/ReportProblemModal";
 import { DateRangePicker } from "../components/DateRangePicker";
 const VIEW_TYPES = Object.keys(VIEW_LABELS) as ViewType[];
 
@@ -45,6 +46,7 @@ export function AppShell() {
   // New-user product tour: auto-show once per user (persisted in localStorage),
   // re-launchable from the user menu.
   const [tourOpen, setTourOpen] = useState(false);
+  const [reportOpen, setReportOpen] = useState(false);
   useEffect(() => {
     if (user?.id && !localStorage.getItem(`fh_tour_${user.id}`)) setTourOpen(true);
   }, [user?.id]);
@@ -96,6 +98,7 @@ export function AppShell() {
   return (
     <div className="min-h-screen flex flex-col bg-slate-50">
       {tourOpen && <ProductTour modules={accessibleModules} onClose={closeTour} />}
+      <ReportProblemModal open={reportOpen} onClose={() => setReportOpen(false)} />
       {/* Top context bar */}
       <header className="h-14 flex items-center gap-4 px-4 bg-white border-b border-slate-200">
         <div className="flex items-center gap-2 pr-2 shrink-0">
@@ -182,7 +185,7 @@ export function AppShell() {
             ))}
           </select>
           <div className="flex items-center pl-2 border-l border-slate-200">
-            <UserMenu onStartTour={() => setTourOpen(true)} />
+            <UserMenu onStartTour={() => setTourOpen(true)} onReportProblem={() => setReportOpen(true)} />
           </div>
         </div>
       </header>

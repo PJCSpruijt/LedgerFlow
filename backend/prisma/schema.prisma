@@ -588,6 +588,53 @@ model RelationCanonicalOverride {
   @@index([workspaceId, canonicalKey])
 }
 
+// Smart incident / central error management (#28). A reported problem is
+// deduplicated by a deterministic fingerprint (route + module + error/title) so
+// repeated reports increment one incident instead of creating noise. Each report
+// adds an IncidentEvent; the incident moves through a status lifecycle.
+model Incident {
+  id               String    @id @default(uuid())
+  fingerprint      String    @unique
+  title            String
+  description      String?
+  severity         String    @default("MEDIUM") // LOW | MEDIUM | HIGH | CRITICAL
+  status           String    @default("NEW") // NEW | ACKNOWLEDGED | INVESTIGATING | FIX_IN_PROGRESS | DEPLOYED | RESOLVED | CLOSED
+  route            String?
+  module           String?
+  errorKey         String?
+  context          Json?
+  workspaceId      String?
+  occurrenceCount  Int       @default(1)
+  reporterCount    Int       @default(1)
+  firstSeenAt      DateTime  @default(now())
+  lastSeenAt       DateTime  @default(now())
+  reportedByUserId String?
+  resolution       String?
+  resolvedAt       DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  events IncidentEvent[]
+
+  @@index([status])
+  @@index([workspaceId])
+  @@index([lastSeenAt])
+}
+
+model IncidentEvent {
+  id         String   @id @default(uuid())
+  incidentId String
+  kind       String // REPORTED | STATUS | NOTE
+  userId     String?
+  message    String?
+  context    Json?
+  createdAt  DateTime @default(now())
+
+  incident Incident @relation(fields: [incidentId], references: [id], onDelete: Cascade)
+
+  @@index([incidentId])
+}
+
 // Per-workspace feature/normalization settings (1:1 with Workspace).
 model WorkspaceSettings {
   id          String   @id @default(uuid())
