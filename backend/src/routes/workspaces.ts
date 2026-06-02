@@ -14,6 +14,7 @@ import { asyncHandler } from "../middleware/asyncHandler.js";
 import { validateBody } from "../middleware/validate.js";
 import { ForbiddenError, NotFoundError } from "../utils/errors.js";
 import { assertWithinLimit } from "../services/plan.service.js";
+import { syncSubscriptionQuantity } from "../services/billing-control.service.js";
 
 export const workspaceRouter = Router();
 
@@ -219,6 +220,7 @@ workspaceRouter.post(
     const entity = await prisma.entity.create({
       data: { name: req.body.name, groupId: group.id },
     });
+    void syncSubscriptionQuantity(req.scope!.workspaceId);
     res.status(201).json({ entity: { id: entity.id, name: entity.name, groupId: entity.groupId } });
   }),
 );

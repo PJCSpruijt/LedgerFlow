@@ -10,6 +10,7 @@ import {
   updateWorkspaceMembership,
   removeWorkspaceMembership,
 } from "../services/team.service.js";
+import { syncSubscriptionQuantity } from "../services/billing-control.service.js";
 
 /**
  * Workspace-scoped team / role management. A workspace admin (WORKSPACE_ADMIN /
@@ -47,6 +48,7 @@ teamRouter.post(
       role: b.role,
       enforceLimit: !isPlatformAdmin(req),
     });
+    void syncSubscriptionQuantity(req.scope!.workspaceId);
     res.status(201).json(out);
   }),
 );
@@ -70,6 +72,7 @@ teamRouter.delete(
   asyncHandler(async (req, res) => {
     const { id } = req.params as z.infer<typeof IdParam>;
     await removeWorkspaceMembership(id, req.scope!.workspaceId);
+    void syncSubscriptionQuantity(req.scope!.workspaceId);
     res.status(204).end();
   }),
 );

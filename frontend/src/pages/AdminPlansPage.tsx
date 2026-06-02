@@ -19,6 +19,7 @@ interface Plan {
   maxAdministrations: number | null;
   maxUsers: number | null;
   maxApiKeys: number | null;
+  billingUnit: string | null;
   stripePriceId: string | null;
   active: boolean;
   sortOrder: number;
@@ -36,6 +37,7 @@ interface FormState {
   maxAdministrations: string;
   maxUsers: string;
   maxApiKeys: string;
+  billingUnit: string;
   stripePriceId: string;
   active: boolean;
   sortOrder: string;
@@ -52,6 +54,7 @@ const emptyForm = (sortOrder: number): FormState => ({
   maxAdministrations: "",
   maxUsers: "",
   maxApiKeys: "",
+  billingUnit: "",
   stripePriceId: "",
   active: true,
   sortOrder: String(sortOrder),
@@ -71,6 +74,7 @@ function formFromPlan(p: Plan): FormState {
     maxAdministrations: numOrEmpty(p.maxAdministrations),
     maxUsers: numOrEmpty(p.maxUsers),
     maxApiKeys: numOrEmpty(p.maxApiKeys),
+    billingUnit: p.billingUnit ?? "",
     stripePriceId: p.stripePriceId ?? "",
     active: p.active,
     sortOrder: String(p.sortOrder),
@@ -163,6 +167,7 @@ export function AdminPlansPage() {
         maxAdministrations: form.maxAdministrations.trim() === "" ? null : Number(form.maxAdministrations),
         maxUsers: form.maxUsers.trim() === "" ? null : Number(form.maxUsers),
         maxApiKeys: form.maxApiKeys.trim() === "" ? null : Number(form.maxApiKeys),
+        billingUnit: form.billingUnit || null,
         stripePriceId: form.stripePriceId.trim() || null,
         active: form.active,
         sortOrder: Number(form.sortOrder) || 0,
@@ -316,6 +321,16 @@ export function AdminPlansPage() {
                 <input className="lf-input" type="number" min={0} placeholder="∞" value={form.maxApiKeys} onChange={(e) => setForm({ ...form, maxApiKeys: e.target.value })} />
               </div>
             </div>
+          </div>
+
+          <div>
+            <label className="lf-label">Prijsmodel</label>
+            <select className="lf-input" value={form.billingUnit} onChange={(e) => setForm({ ...form, billingUnit: e.target.value })}>
+              <option value="">Vast bedrag</option>
+              <option value="ADMINISTRATION">Per administratie (prijs × aantal)</option>
+              <option value="USER">Per gebruiker (prijs × aantal)</option>
+            </select>
+            {form.billingUnit && <p className="text-xs text-slate-400 mt-1">Het bedrag geldt per eenheid; het aantal wordt automatisch als hoeveelheid naar Stripe gestuurd.</p>}
           </div>
 
           <div>

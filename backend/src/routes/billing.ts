@@ -10,6 +10,7 @@ import { validateBody } from "../middleware/validate.js";
 import { requireAuth, requireScope, requireScopeRole } from "../middleware/auth.js";
 import { mapStripeStatus } from "../services/subscription.service.js";
 import { getLicenseStatus } from "../services/plan.service.js";
+import { changePlan } from "../services/billing-control.service.js";
 import { moduleLabels } from "../config/modules.js";
 import { BadRequestError, NotFoundError } from "../utils/errors.js";
 
@@ -96,6 +97,7 @@ billingRouter.get(
         interval: p.interval,
         modules: p.modules,
         features: moduleLabels(p.modules),
+        billingUnit: p.billingUnit,
         checkoutAvailable: p.key in SubscriptionPlan,
       })),
     });
@@ -127,6 +129,23 @@ billingRouter.get(
           }
         : null,
     });
+  }),
+);
+
+/**
+ * Change the plan in-app. A live Stripe subscription is updated with proration
+ * (price swap on the existing item, no new checkout); otherwise the plan is
+ * assigned directly. Admin only.
+ */
+billingRouter.post(
+  "/change-plan",
+  requireAuth,
+  requireScope,
+  requireScopeRole(ScopedRole.WORKSPACE_ADMIN),
+  validateBody(z.object({ plan: z.string().min(1) })),
+  asyncHandler(async (req, res) => {
+    const result = await changePlan({ workspaceId: req.scope!.workspaceId, planKey: req.body.plan });
+    res.json(result);
   }),
 );
 

@@ -11,6 +11,7 @@ interface PlanOption {
   currency: string;
   interval: "MONTH" | "YEAR";
   features: string[];
+  billingUnit: string | null;
   checkoutAvailable: boolean;
 }
 
@@ -62,6 +63,7 @@ export function BillingPage() {
   const [busyPlan, setBusyPlan] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const isWorkspaceAdmin = workspace?.role === "WORKSPACE_ADMIN";
+  const hasSubscription = !!sub && sub.status !== "NONE";
 
   const loadSub = async () => {
     const r = await api<{ subscription: Subscription | null }>("/api/billing/subscription");
@@ -143,6 +145,22 @@ export function BillingPage() {
       if (r.url) window.location.href = r.url;
     } catch (e) {
       setErr(e instanceof ApiError ? e.message : "Checkout mislukt");
+    } finally {
+      setBusyPlan(null);
+    }
+  };
+
+  // Switch the plan of an existing subscription in-app (Stripe proration when
+  // managed, otherwise a direct assignment) — no new checkout.
+  const changePlanTo = async (planKey: string) => {
+    if (!window.confirm("Overstappen naar dit plan? Bij een lopend Stripe-abonnement wordt het verschil verrekend (proratie).")) return;
+    setErr(null);
+    setBusyPlan(planKey);
+    try {
+      await api("/api/billing/change-plan", { method: "POST", body: { plan: planKey } });
+      await loadSub();
+    } catch (e) {
+      setErr(e instanceof ApiError ? e.message : "Plan wijzigen mislukt");
     } finally {
       setBusyPlan(null);
     }
@@ -245,6 +263,7 @@ export function BillingPage() {
               <div className="text-lg font-semibold">{p.name}</div>
               <div className="text-2xl font-bold mt-2">
                 {fmtPrice(p.priceCents, p.currency, p.interval)}
+                {p.billingUnit && <span className="text-sm font-normal text-slate-500"> / {p.billingUnit === "USER" ? "gebruiker" : "administratie"}</span>}
               </div>
               {p.description && (
                 <div className="text-sm text-slate-500 mt-1">{p.description}</div>
@@ -258,6 +277,12 @@ export function BillingPage() {
                 <div className="lf-pill bg-emerald-100 text-emerald-800 mt-4 self-start">
                   Huidig plan
                 </div>
+              ) : !isWorkspaceAdmin ? (
+                <div className="text-xs text-slate-400 mt-4">Alleen een werkruimtebeheerder kan het plan wijzigen.</div>
+              ) : hasSubscription ? (
+                <button className="lf-btn-secondary mt-4" disabled={busyPlan !== null} onClick={() => changePlanTo(p.key)}>
+                  {busyPlan === p.key ? "Bezig…" : "Wijzig naar dit plan"}
+                </button>
               ) : p.checkoutAvailable ? (
                 <button
                   className="lf-btn-primary mt-4"

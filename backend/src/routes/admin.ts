@@ -247,6 +247,7 @@ const PlanCreateSchema = z.object({
   maxAdministrations: z.number().int().min(0).nullish(),
   maxUsers: z.number().int().min(0).nullish(),
   maxApiKeys: z.number().int().min(0).nullish(),
+  billingUnit: z.enum(["ADMINISTRATION", "USER"]).nullish(),
   stripePriceId: z.string().max(120).nullish(),
   active: z.boolean().default(true),
   sortOrder: z.number().int().default(0),
@@ -263,6 +264,7 @@ const PlanUpdateSchema = z.object({
   maxAdministrations: z.number().int().min(0).nullish(),
   maxUsers: z.number().int().min(0).nullish(),
   maxApiKeys: z.number().int().min(0).nullish(),
+  billingUnit: z.enum(["ADMINISTRATION", "USER"]).nullish(),
   stripePriceId: z.string().max(120).nullish(),
   active: z.boolean().optional(),
   sortOrder: z.number().int().optional(),
@@ -282,6 +284,7 @@ function serializePlan(p: {
   maxAdministrations: number | null;
   maxUsers: number | null;
   maxApiKeys: number | null;
+  billingUnit: string | null;
   stripePriceId: string | null;
   active: boolean;
   sortOrder: number;
@@ -299,6 +302,7 @@ function serializePlan(p: {
     maxAdministrations: p.maxAdministrations,
     maxUsers: p.maxUsers,
     maxApiKeys: p.maxApiKeys,
+    billingUnit: p.billingUnit,
     stripePriceId: p.stripePriceId,
     active: p.active,
     sortOrder: p.sortOrder,
@@ -337,6 +341,7 @@ adminRouter.post(
         maxAdministrations: body.maxAdministrations ?? null,
         maxUsers: body.maxUsers ?? null,
         maxApiKeys: body.maxApiKeys ?? null,
+        billingUnit: body.billingUnit ?? null,
         stripePriceId: body.stripePriceId ?? null,
         active: body.active,
         sortOrder: body.sortOrder,
@@ -368,6 +373,7 @@ adminRouter.patch(
         maxAdministrations: body.maxAdministrations === undefined ? undefined : body.maxAdministrations,
         maxUsers: body.maxUsers === undefined ? undefined : body.maxUsers,
         maxApiKeys: body.maxApiKeys === undefined ? undefined : body.maxApiKeys,
+        billingUnit: body.billingUnit === undefined ? undefined : body.billingUnit,
         stripePriceId: body.stripePriceId === undefined ? undefined : body.stripePriceId,
         active: body.active,
         sortOrder: body.sortOrder,
