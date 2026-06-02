@@ -21,6 +21,7 @@ import {
   cachedCreditors,
 } from "../services/connector-cache.service.js";
 import { applyVatMappings } from "../services/vat-mapping.service.js";
+import { getConnectionUsage } from "../services/connection-usage.service.js";
 import { applyRgsMappings } from "../services/rgs-mapping.service.js";
 import { convert, prefetchRates } from "../services/fx.service.js";
 import { ConnectionKind } from "@prisma/client";
@@ -186,6 +187,38 @@ yukiRouter.get(
         connection: e.connection,
       })),
     });
+  }),
+);
+
+/**
+ * Per-connection API usage + daily-limit visibility for the workspace, filtered
+ * to the administrations the user can reach. Rolls up the API Usage Ledger so an
+ * admin sees call volume + how close each koppeling is to its limit.
+ */
+yukiRouter.get(
+  "/usage",
+  requireAuth,
+  requireScope,
+  validateQuery(z.object({ days: z.coerce.number().int().min(1).max(90).optional() })),
+  asyncHandler(async (req, res) => {
+    const workspaceId = req.scope!.workspaceId;
+    const days = (req.query as { days?: number }).days ?? 7;
+    const memberships = await prisma.membership.findMany({ where: { userId: req.user!.id } });
+    const wsAccess =
+      isPlatformAdmin(req) || memberships.some((m) => m.scopeLevel === "WORKSPACE" && m.workspaceId === workspaceId);
+    const groupIds = new Set(memberships.filter((m) => m.groupId).map((m) => m.groupId));
+    const entIds = new Set(memberships.filter((m) => m.entityId).map((m) => m.entityId));
+
+    const entities = await prisma.entity.findMany({
+      where: { group: { workspaceId } },
+      select: { id: true, name: true, groupId: true, group: { select: { name: true } }, connection: { select: { kind: true } } },
+      orderBy: { name: "asc" },
+    });
+    const visible = entities
+      .filter((e) => wsAccess || groupIds.has(e.groupId) || entIds.has(e.id))
+      .map((e) => ({ id: e.id, name: e.name, groupName: e.group.name, connectorType: e.connection?.kind ?? null }));
+
+    res.json(await getConnectionUsage(visible, days, new Date()));
   }),
 );
 

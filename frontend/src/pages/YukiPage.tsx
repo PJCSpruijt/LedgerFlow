@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { api, ApiError } from "../services/api";
 import { isAdminRole, useScope } from "../contexts/ScopeContext";
 import { ConnectorWizard } from "../components/ConnectorWizard";
+import { ConnectionUsagePanel } from "../components/ConnectionUsagePanel";
 
 type Kind = "yuki" | "eboekhouden";
 type DbKind = "YUKI" | "EBOEKHOUDEN";
@@ -200,6 +201,9 @@ export function YukiPage() {
         </div>
         </div>
       </div>
+
+      {/* ---- API-verbruik & limieten (per koppeling, hele werkruimte) ---- */}
+      <ConnectionUsagePanel />
 
       {/* ---- Workspace overview ---- */}
       {view === "workspace" && (
