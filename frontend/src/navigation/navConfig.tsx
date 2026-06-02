@@ -3,6 +3,8 @@ import type { ScopedRole } from "../contexts/ScopeContext";
 import { DashboardPage } from "../pages/DashboardPage";
 import { TeamPage } from "../pages/TeamPage";
 import { AgingReportPage } from "../pages/AgingReportPage";
+import { DataQualityPage } from "../pages/DataQualityPage";
+import { RawExplorerPage } from "../pages/RawExplorerPage";
 import { YukiPage } from "../pages/YukiPage";
 import { ExportsPage } from "../pages/ExportsPage";
 import { VatMappingPage } from "../pages/VatMappingPage";
@@ -84,7 +86,7 @@ export const MODULES: ModuleDef[] = [
     subpages: [
       { path: "overview", label: "Overzicht", element: <DashboardPage /> },
       { path: "sync-status", label: "Synchronisatiestatus", element: soon("Synchronisatiestatus") },
-      { path: "data-quality", label: "Datakwaliteit", element: soon("Datakwaliteit") },
+      { path: "data-quality", label: "Datakwaliteit", element: <DataQualityPage /> },
       { path: "tasks", label: "Taken & waarschuwingen", element: soon("Taken & waarschuwingen") },
       { path: "activity", label: "Recente activiteit", element: soon("Recente activiteit") },
     ],
@@ -104,7 +106,7 @@ export const MODULES: ModuleDef[] = [
       { path: "relations", label: "Relaties", element: <RelationsView mode="all" /> },
       { path: "source-documents", label: "Brondocumenten", element: soon("Brondocumenten") },
       { path: "sync-history", label: "Synchronisatiegeschiedenis", element: soon("Synchronisatiegeschiedenis") },
-      { path: "raw-explorer", label: "Ruwe data", element: soon("Ruwe data") },
+      { path: "raw-explorer", label: "Ruwe data", element: <RawExplorerPage /> },
     ],
   },
   {
