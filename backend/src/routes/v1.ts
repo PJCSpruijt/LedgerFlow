@@ -17,6 +17,7 @@ import {
 } from "../services/rgs-mapping.service.js";
 import { listSourceAccounts } from "../services/source-account.service.js";
 import { consolidate } from "../services/consolidation.service.js";
+import { fundWorkspaces, portfolioSummary } from "../services/portfolio.service.js";
 import { convert, prefetchRates } from "../services/fx.service.js";
 import { BadRequestError, ForbiddenError, NotFoundError } from "../utils/errors.js";
 import type { TransactionLine } from "../clients/connectors/interfaces/Connector.js";
@@ -46,6 +47,12 @@ function sendV1(res: Response, data: unknown, meta: Record<string, unknown> = {}
 }
 
 const keyOf = (res: Response): ApiKey => res.locals.apiKey as ApiKey;
+
+/** A workspace-scoped key's workspace id; rejects fund (cross-tenant) keys. */
+function wsOf(key: ApiKey): string {
+  if (!key.workspaceId) throw new ForbiddenError("Deze endpoint vereist een werkruimte-sleutel, geen fonds-sleutel");
+  return key.workspaceId;
+}
 
 // ---- Discovery (public, no key) -------------------------------------------
 const OPENAPI = {
@@ -94,12 +101,39 @@ v1Router.use(requireApiKey);
 
 v1Router.get("/ping", (_req, res) => sendV1(res, { ok: true }));
 
+// ---- Portfolio (cross-tenant, fund-scoped keys) ---------------------------
+// A fund key reads across every portfolio holding (workspace) of its fund.
+
+function requireFund(res: Response): string {
+  const key = keyOf(res);
+  if (!key.fundId) throw new ForbiddenError("Deze endpoint vereist een fonds-sleutel (portfolio-toegang)");
+  return key.fundId;
+}
+
+v1Router.get(
+  "/portfolio/companies",
+  asyncHandler(async (_req, res) => {
+    const companies = await fundWorkspaces(requireFund(res));
+    sendV1(res, companies, { count: companies.length });
+  }),
+);
+
+v1Router.get(
+  "/portfolio/summary",
+  asyncHandler(async (req, res) => {
+    const fundId = requireFund(res);
+    const { from, to, currency } = dateRange(req);
+    const result = await portfolioSummary({ fundId, from, to, currency });
+    sendV1(res, result, { from, to, currency, companies: result.companies.length });
+  }),
+);
+
 v1Router.get(
   "/workspaces",
   asyncHandler(async (_req, res) => {
     const key = keyOf(res);
     const ws = await prisma.workspace.findUnique({
-      where: { id: key.workspaceId },
+      where: { id: wsOf(key) },
       select: { id: true, name: true, type: true },
     });
     sendV1(res, ws ? [ws] : []);
@@ -111,7 +145,7 @@ v1Router.get(
   asyncHandler(async (_req, res) => {
     const key = keyOf(res);
     const groups = await prisma.group.findMany({
-      where: { workspaceId: key.workspaceId },
+      where: { workspaceId: wsOf(key) },
       select: { id: true, name: true, workspaceId: true },
       orderBy: { name: "asc" },
     });
@@ -125,7 +159,7 @@ v1Router.get(
     const key = keyOf(res);
     const entities = await prisma.entity.findMany({
       where: {
-        group: { workspaceId: key.workspaceId },
+        group: { workspaceId: wsOf(key) },
         ...(key.entityId ? { id: key.entityId } : {}),
       },
       select: { id: true, name: true, groupId: true },
@@ -153,11 +187,11 @@ async function resolveEntity(req: Request, res: Response): Promise<ScopedEntity>
   if (key.entityId && key.entityId !== requested)
     throw new ForbiddenError("Buiten het bereik van deze API-sleutel");
   const ent = await prisma.entity.findFirst({
-    where: { id: requested, group: { workspaceId: key.workspaceId } },
+    where: { id: requested, group: { workspaceId: wsOf(key) } },
     select: { id: true, name: true, groupId: true, connection: { select: { kind: true } } },
   });
   if (!ent) throw new NotFoundError("Administratie niet gevonden in deze werkruimte");
-  return { id: ent.id, name: ent.name, groupId: ent.groupId, workspaceId: key.workspaceId, connectorType: ent.connection?.kind ?? "—" };
+  return { id: ent.id, name: ent.name, groupId: ent.groupId, workspaceId: wsOf(key), connectorType: ent.connection?.kind ?? "—" };
 }
 
 const csvEscape = (v: unknown): string => {
@@ -315,7 +349,7 @@ v1Router.get(
   "/rgs-mappings",
   asyncHandler(async (_req, res) => {
     const key = keyOf(res);
-    const version = await resolveRgsVersion(key.workspaceId);
+    const version = await resolveRgsVersion(wsOf(key));
     const { page, meta } = paginate(_req, await prisma.rgsAccount.findMany({
       where: {
         version,
@@ -348,7 +382,7 @@ v1Router.get(
   "/fin-categories",
   asyncHandler(async (_req, res) => {
     const key = keyOf(res);
-    const cats = await listFinCategories(key.workspaceId);
+    const cats = await listFinCategories(wsOf(key));
     await respond(_req, res, cats.map((c) => ({ key: c.key, label: c.label, kind: c.kind, workspace_scoped: c.workspaceId !== null })));
   }),
 );
@@ -522,10 +556,10 @@ async function runConsolidation(req: Request, res: Response) {
   const { from, to, currency } = dateRange(req);
   const groupId = String(req.query.groupId ?? "").trim() || null;
   if (groupId) {
-    const g = await prisma.group.findFirst({ where: { id: groupId, workspaceId: key.workspaceId }, select: { id: true } });
+    const g = await prisma.group.findFirst({ where: { id: groupId, workspaceId: wsOf(key) }, select: { id: true } });
     if (!g) throw new NotFoundError("Groep niet gevonden in deze werkruimte");
   }
-  const result = await consolidate({ workspaceId: key.workspaceId, groupId, from, to, currency });
+  const result = await consolidate({ workspaceId: wsOf(key), groupId, from, to, currency });
   return { key, result, from, to, currency };
 }
 
@@ -535,7 +569,7 @@ v1Router.get(
     const { key, result, from, to, currency } = await runConsolidation(req, res);
     const rows = result.leaves
       .map((l) => ({
-        workspace_id: key.workspaceId,
+        workspace_id: wsOf(key),
         group_id: result.groupId,
         statement: l.statement,
         rgs_group_code: l.rgsGroupCode,
@@ -585,7 +619,7 @@ v1Router.get(
       const side = g.statement === "PNL" ? "PNL" : PASSIVA_GROUPS.has(g.code) || g.dc === "C" ? "PASSIVA" : "ACTIVA";
       const amount = g.statement === "PNL" || side === "PASSIVA" ? -g.balance : g.balance;
       return {
-        workspace_id: key.workspaceId,
+        workspace_id: wsOf(key),
         group_id: result.groupId,
         statement: g.statement,
         side,
@@ -618,7 +652,7 @@ v1Router.get(
     const { from, to } = dateRange(req);
     const logs = await prisma.auditLog.findMany({
       where: {
-        workspaceId: key.workspaceId,
+        workspaceId: wsOf(key),
         timestamp: { gte: new Date(`${from}T00:00:00.000Z`), lte: new Date(`${to}T23:59:59.999Z`) },
         ...(typeof req.query.action === "string" && req.query.action ? { action: req.query.action } : {}),
       },

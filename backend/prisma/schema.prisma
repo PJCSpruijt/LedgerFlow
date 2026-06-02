@@ -98,6 +98,7 @@ model Workspace {
   accountDefaults   WorkspaceAccountDefault[]
   settings          WorkspaceSettings?
   apiKeys           ApiKey[]
+  portfolioHoldings PortfolioHolding[]
 }
 
 // A Group is a consolidation group inside a workspace (e.g. a holding).
@@ -345,7 +346,10 @@ model RefreshToken {
 // of the key is stored; the raw value is shown once at creation.
 model ApiKey {
   id              String    @id @default(uuid())
-  workspaceId     String
+  // A key is EITHER workspace-scoped (workspaceId set) OR fund-scoped (fundId
+  // set) — a fund key reads across every portfolio holding of that fund.
+  workspaceId     String?
+  fundId          String?
   name            String
   prefix          String // first chars of the key, for display (e.g. "fhk_ab12cd")
   keyHash         String    @unique // sha256(full key)
@@ -358,10 +362,42 @@ model ApiKey {
   revokedAt       DateTime?
   createdAt       DateTime  @default(now())
 
-  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  workspace Workspace?     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  fund      PortfolioFund? @relation(fields: [fundId], references: [id], onDelete: Cascade)
 
   @@index([workspaceId])
+  @@index([fundId])
   @@index([keyHash])
+}
+
+// A Private-Equity / investment fund: an external accessor that reads financial
+// data across MULTIPLE portfolio companies (workspaces) through one fund-scoped
+// API key — for Excel / Power BI / data-warehouse use. Cross-tenant by design.
+model PortfolioFund {
+  id              String   @id @default(uuid())
+  name            String
+  createdByUserId String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  holdings PortfolioHolding[]
+  apiKeys  ApiKey[]
+}
+
+// One portfolio company in a fund: a link from a fund to a workspace it may read.
+model PortfolioHolding {
+  id          String   @id @default(uuid())
+  fundId      String
+  workspaceId String
+  label       String?
+  stakePct    Float?
+  createdAt   DateTime @default(now())
+
+  fund      PortfolioFund @relation(fields: [fundId], references: [id], onDelete: Cascade)
+  workspace Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([fundId, workspaceId])
+  @@index([fundId])
 }
 
 // Append-only ledger of EVERY outbound connector request (#26). Used for vendor

@@ -12,7 +12,10 @@ const hash = (raw: string) => createHash("sha256").update(raw).digest("hex");
 
 /** Generate a new key: returns the raw value (shown once) + the persisted row. */
 export async function createApiKey(input: {
-  workspaceId: string;
+  /** Workspace-scoped key (mutually exclusive with fundId). */
+  workspaceId?: string | null;
+  /** Fund-scoped key — reads across the fund's portfolio holdings. */
+  fundId?: string | null;
   name: string;
   entityId?: string | null;
   rateLimitPerMin?: number;
@@ -22,7 +25,8 @@ export async function createApiKey(input: {
   const raw = `fhk_${randomBytes(24).toString("hex")}`;
   const apiKey = await prisma.apiKey.create({
     data: {
-      workspaceId: input.workspaceId,
+      workspaceId: input.workspaceId ?? null,
+      fundId: input.fundId ?? null,
       name: input.name,
       prefix: raw.slice(0, 12),
       keyHash: hash(raw),
