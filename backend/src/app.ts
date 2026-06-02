@@ -17,6 +17,7 @@ import { workspaceRouter } from "./routes/workspaces.js";
 import { ledgerRouter } from "./routes/ledger.js";
 import { teamRouter } from "./routes/team.js";
 import { reportingRouter } from "./routes/reporting.js";
+import { relationsRouter } from "./routes/relations.js";
 import { exportRouter } from "./routes/export.js";
 import { billingRouter, stripeWebhookRouter } from "./routes/billing.js";
 import { adminRouter } from "./routes/admin.js";
@@ -93,6 +94,7 @@ export function createApp() {
   app.use("/api/yuki", ledgerRouter);
   app.use("/api/team", teamRouter);
   app.use("/api/reporting", reportingRouter);
+  app.use("/api/relations", relationsRouter);
   app.use("/api/export", exportRouter);
   app.use("/api/billing", billingRouter);
   app.use("/api/admin", adminRouter);

@@ -6,6 +6,7 @@ import { AgingReportPage } from "../pages/AgingReportPage";
 import { DataQualityPage } from "../pages/DataQualityPage";
 import { RawExplorerPage } from "../pages/RawExplorerPage";
 import { RgsDefaultsPage } from "../pages/RgsDefaultsPage";
+import { RelationsMappingPage } from "../pages/RelationsMappingPage";
 import { YukiPage } from "../pages/YukiPage";
 import { ExportsPage } from "../pages/ExportsPage";
 import { VatMappingPage } from "../pages/VatMappingPage";
@@ -120,7 +121,7 @@ export const MODULES: ModuleDef[] = [
       { path: "rgs", label: "Rekeningkoppelingen (RGS)", element: <RgsMappingPage /> },
       { path: "fin-categories", label: "FIN-categorieën", element: <FinCategoriesPage /> },
       { path: "universal-coa", label: "Universeel rekeningschema", element: <UniversalChartPage /> },
-      { path: "relations", label: "Relatiekoppelingen", element: soon("Relatiekoppelingen") },
+      { path: "relations", label: "Relatiekoppelingen", element: <RelationsMappingPage /> },
       { path: "cashflow", label: "Kasstroomkoppelingen", element: soon("Kasstroomkoppelingen") },
       { path: "reporting-structures", label: "Rapportagestructuren", element: soon("Rapportagestructuren") },
       { path: "templates", label: "Standaardsjablonen", element: soon("Standaardsjablonen") },

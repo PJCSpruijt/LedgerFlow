@@ -562,6 +562,32 @@ model WorkspaceAccountDefault {
   @@index([workspaceId])
 }
 
+// Canonical relation override. The same external party (debtor/creditor) often
+// appears in multiple administrations under slightly different names. By default
+// relations are grouped automatically by normalized name; this row is the manual
+// override that pins a per-administration relation to a chosen canonical group
+// (canonicalKey) — letting the user merge differently-named relations or split a
+// wrongly-merged one, and attach canonical attributes (display name, VAT, email).
+model RelationCanonicalOverride {
+  id              String   @id @default(uuid())
+  workspaceId     String
+  entityId        String // administration where the relation lives
+  relationId      String // connector relation id
+  relationName    String?
+  canonicalKey    String // the canonical group this relation belongs to
+  displayName     String?
+  vatNumber       String?
+  email           String?
+  note            String?
+  createdByUserId String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([entityId, relationId])
+  @@index([workspaceId])
+  @@index([workspaceId, canonicalKey])
+}
+
 // Per-workspace feature/normalization settings (1:1 with Workspace).
 model WorkspaceSettings {
   id          String   @id @default(uuid())
