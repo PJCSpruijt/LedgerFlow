@@ -38,3 +38,10 @@ backend/tmp/
 
 # DB backups / dumps
 backups/
+
+# Vite temp config (regenerated each run)
+**/vite.config.ts.timestamp-*.mjs
+
+# Generated doc renders (keep .md source + .docx deliverable)
+docs/*.pdf
+docs/*.txt
