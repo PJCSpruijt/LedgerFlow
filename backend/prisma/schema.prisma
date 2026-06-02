@@ -635,6 +635,51 @@ model IncidentEvent {
   @@index([incidentId])
 }
 
+// FIN//HUB Labs (#29): product feedback / feature voting / roadmap. Users post
+// ideas, upvote and comment; ideas move through a roadmap status lifecycle.
+model LabIdea {
+  id              String   @id @default(uuid())
+  workspaceId     String?
+  title           String
+  description     String
+  category        String   @default("OTHER")
+  status          String   @default("NEW") // NEW|UNDER_REVIEW|PLANNED|IN_PROGRESS|BETA|RELEASED|DECLINED|DUPLICATE
+  visibility      String   @default("PUBLIC") // PUBLIC|WORKSPACE_ONLY|INTERNAL
+  voteCount       Int      @default(0)
+  createdByUserId String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  votes    LabVote[]
+  comments LabComment[]
+
+  @@index([status])
+  @@index([category])
+}
+
+model LabVote {
+  id        String   @id @default(uuid())
+  ideaId    String
+  userId    String
+  createdAt DateTime @default(now())
+
+  idea LabIdea @relation(fields: [ideaId], references: [id], onDelete: Cascade)
+
+  @@unique([ideaId, userId])
+}
+
+model LabComment {
+  id        String   @id @default(uuid())
+  ideaId    String
+  userId    String?
+  body      String
+  createdAt DateTime @default(now())
+
+  idea LabIdea @relation(fields: [ideaId], references: [id], onDelete: Cascade)
+
+  @@index([ideaId])
+}
+
 // Per-workspace feature/normalization settings (1:1 with Workspace).
 model WorkspaceSettings {
   id          String   @id @default(uuid())

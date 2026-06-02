@@ -35,6 +35,8 @@ import { AdminUsersPage } from "../pages/AdminUsersPage";
 import { AdminPlansPage } from "../pages/AdminPlansPage";
 import { AdminStatsPage } from "../pages/AdminStatsPage";
 import { AdminIncidentsPage } from "../pages/AdminIncidentsPage";
+import { LabsPage } from "../pages/LabsPage";
+import { LabsRoadmapPage } from "../pages/LabsRoadmapPage";
 import { Placeholder } from "../pages/Placeholder";
 
 /**
@@ -167,6 +169,16 @@ export const MODULES: ModuleDef[] = [
       { path: "audit", label: "Auditrapportages", element: soon("Auditrapportages") },
       { path: "scheduled", label: "Geplande exports", element: soon("Geplande exports") },
       { path: "api", label: "API-toegang", element: <ApiKeysPage /> },
+    ],
+  },
+  {
+    key: "labs",
+    label: "FIN//HUB Labs",
+    basePath: "/labs",
+    icon: "🧪",
+    subpages: [
+      { path: "ideas", label: "Ideeën", element: <LabsPage /> },
+      { path: "roadmap", label: "Roadmap", element: <LabsRoadmapPage /> },
     ],
   },
   {
