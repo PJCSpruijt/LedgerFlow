@@ -16,6 +16,9 @@ interface Plan {
   currency: string;
   interval: "MONTH" | "YEAR";
   modules: string[];
+  maxAdministrations: number | null;
+  maxUsers: number | null;
+  maxApiKeys: number | null;
   stripePriceId: string | null;
   active: boolean;
   sortOrder: number;
@@ -30,6 +33,9 @@ interface FormState {
   currency: string;
   interval: "MONTH" | "YEAR";
   modules: Set<string>;
+  maxAdministrations: string;
+  maxUsers: string;
+  maxApiKeys: string;
   stripePriceId: string;
   active: boolean;
   sortOrder: string;
@@ -43,10 +49,15 @@ const emptyForm = (sortOrder: number): FormState => ({
   currency: "EUR",
   interval: "MONTH",
   modules: new Set(),
+  maxAdministrations: "",
+  maxUsers: "",
+  maxApiKeys: "",
   stripePriceId: "",
   active: true,
   sortOrder: String(sortOrder),
 });
+
+const numOrEmpty = (n: number | null) => (n == null ? "" : String(n));
 
 function formFromPlan(p: Plan): FormState {
   return {
@@ -57,6 +68,9 @@ function formFromPlan(p: Plan): FormState {
     currency: p.currency,
     interval: p.interval,
     modules: new Set(p.modules),
+    maxAdministrations: numOrEmpty(p.maxAdministrations),
+    maxUsers: numOrEmpty(p.maxUsers),
+    maxApiKeys: numOrEmpty(p.maxApiKeys),
     stripePriceId: p.stripePriceId ?? "",
     active: p.active,
     sortOrder: String(p.sortOrder),
@@ -146,6 +160,9 @@ export function AdminPlansPage() {
         currency: form.currency.trim().toUpperCase(),
         interval: form.interval,
         modules: [...form.modules],
+        maxAdministrations: form.maxAdministrations.trim() === "" ? null : Number(form.maxAdministrations),
+        maxUsers: form.maxUsers.trim() === "" ? null : Number(form.maxUsers),
+        maxApiKeys: form.maxApiKeys.trim() === "" ? null : Number(form.maxApiKeys),
         stripePriceId: form.stripePriceId.trim() || null,
         active: form.active,
         sortOrder: Number(form.sortOrder) || 0,
@@ -280,6 +297,24 @@ export function AdminPlansPage() {
                 value={form.sortOrder}
                 onChange={(e) => setForm({ ...form, sortOrder: e.target.value })}
               />
+            </div>
+          </div>
+
+          <div>
+            <label className="lf-label">Limieten (leeg = ongelimiteerd)</label>
+            <div className="mt-1 grid grid-cols-1 md:grid-cols-3 gap-3">
+              <div>
+                <span className="text-xs text-slate-500">Max. administraties</span>
+                <input className="lf-input" type="number" min={0} placeholder="∞" value={form.maxAdministrations} onChange={(e) => setForm({ ...form, maxAdministrations: e.target.value })} />
+              </div>
+              <div>
+                <span className="text-xs text-slate-500">Max. gebruikers</span>
+                <input className="lf-input" type="number" min={0} placeholder="∞" value={form.maxUsers} onChange={(e) => setForm({ ...form, maxUsers: e.target.value })} />
+              </div>
+              <div>
+                <span className="text-xs text-slate-500">Max. API-sleutels</span>
+                <input className="lf-input" type="number" min={0} placeholder="∞" value={form.maxApiKeys} onChange={(e) => setForm({ ...form, maxApiKeys: e.target.value })} />
+              </div>
             </div>
           </div>
 

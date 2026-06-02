@@ -88,6 +88,16 @@ export class TwoFactorEnrollmentRequiredError extends AppError {
  * `details` may carry raw upstream snippets (logged, never returned); the safe
  * `rateLimited` + `connector` fields are surfaced to the client by the handler.
  */
+/**
+ * A workspace hit a per-plan quantity limit (e.g. max administrations/users).
+ * 403 with the resource + limit + current usage so the UI can prompt an upgrade.
+ */
+export class PlanLimitError extends AppError {
+  constructor(resource: string, limit: number, used: number) {
+    super(403, "PLAN_LIMIT_REACHED", `Limiet van je abonnement bereikt voor ${resource} (${used}/${limit}). Upgrade je plan om meer toe te voegen.`, { resource, limit, used });
+  }
+}
+
 export class ConnectorError extends AppError {
   public readonly rateLimited: boolean;
   public readonly connector?: string;

@@ -2,7 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 import { ScopeLevel, ScopedRole } from "@prisma/client";
 import { asyncHandler } from "../middleware/asyncHandler.js";
-import { requireAuth, requireScope, requireScopeRole, SCOPE_ADMIN_ROLES } from "../middleware/auth.js";
+import { isPlatformAdmin, requireAuth, requireScope, requireScopeRole, SCOPE_ADMIN_ROLES } from "../middleware/auth.js";
 import { validateBody, validateParams } from "../middleware/validate.js";
 import {
   listWorkspaceTeam,
@@ -45,6 +45,7 @@ teamRouter.post(
       scopeLevel: b.scopeLevel,
       scopeId: b.scopeId,
       role: b.role,
+      enforceLimit: !isPlatformAdmin(req),
     });
     res.status(201).json(out);
   }),

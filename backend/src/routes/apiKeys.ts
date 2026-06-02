@@ -3,8 +3,9 @@ import { z } from "zod";
 import { prisma } from "../config/prisma.js";
 import { asyncHandler } from "../middleware/asyncHandler.js";
 import { validateBody, validateParams } from "../middleware/validate.js";
-import { requireAuth, requireScope, requireScopeRole, SCOPE_ADMIN_ROLES } from "../middleware/auth.js";
+import { isPlatformAdmin, requireAuth, requireScope, requireScopeRole, SCOPE_ADMIN_ROLES } from "../middleware/auth.js";
 import { createApiKey, listApiKeys, revokeApiKey } from "../services/api-key.service.js";
+import { assertWithinLimit } from "../services/plan.service.js";
 import { BadRequestError, NotFoundError } from "../utils/errors.js";
 
 /**
@@ -45,6 +46,7 @@ apiKeysRouter.post(
       });
       if (!ent) throw new BadRequestError("Administratie hoort niet bij deze werkruimte");
     }
+    if (!isPlatformAdmin(req)) await assertWithinLimit(workspaceId, "apiKeys");
     const { raw, apiKey } = await createApiKey({
       workspaceId,
       name: body.name,

@@ -244,6 +244,9 @@ const PlanCreateSchema = z.object({
   currency: z.string().length(3).default("EUR"),
   interval: z.nativeEnum(BillingInterval).default(BillingInterval.MONTH),
   modules: moduleArray.default([]),
+  maxAdministrations: z.number().int().min(0).nullish(),
+  maxUsers: z.number().int().min(0).nullish(),
+  maxApiKeys: z.number().int().min(0).nullish(),
   stripePriceId: z.string().max(120).nullish(),
   active: z.boolean().default(true),
   sortOrder: z.number().int().default(0),
@@ -257,6 +260,9 @@ const PlanUpdateSchema = z.object({
   currency: z.string().length(3).optional(),
   interval: z.nativeEnum(BillingInterval).optional(),
   modules: moduleArray.optional(),
+  maxAdministrations: z.number().int().min(0).nullish(),
+  maxUsers: z.number().int().min(0).nullish(),
+  maxApiKeys: z.number().int().min(0).nullish(),
   stripePriceId: z.string().max(120).nullish(),
   active: z.boolean().optional(),
   sortOrder: z.number().int().optional(),
@@ -273,6 +279,9 @@ function serializePlan(p: {
   currency: string;
   interval: BillingInterval;
   modules: string[];
+  maxAdministrations: number | null;
+  maxUsers: number | null;
+  maxApiKeys: number | null;
   stripePriceId: string | null;
   active: boolean;
   sortOrder: number;
@@ -287,6 +296,9 @@ function serializePlan(p: {
     currency: p.currency,
     interval: p.interval,
     modules: p.modules,
+    maxAdministrations: p.maxAdministrations,
+    maxUsers: p.maxUsers,
+    maxApiKeys: p.maxApiKeys,
     stripePriceId: p.stripePriceId,
     active: p.active,
     sortOrder: p.sortOrder,
@@ -322,6 +334,9 @@ adminRouter.post(
         currency: body.currency,
         interval: body.interval,
         modules: body.modules,
+        maxAdministrations: body.maxAdministrations ?? null,
+        maxUsers: body.maxUsers ?? null,
+        maxApiKeys: body.maxApiKeys ?? null,
         stripePriceId: body.stripePriceId ?? null,
         active: body.active,
         sortOrder: body.sortOrder,
@@ -350,6 +365,9 @@ adminRouter.patch(
         currency: body.currency,
         interval: body.interval,
         modules: body.modules,
+        maxAdministrations: body.maxAdministrations === undefined ? undefined : body.maxAdministrations,
+        maxUsers: body.maxUsers === undefined ? undefined : body.maxUsers,
+        maxApiKeys: body.maxApiKeys === undefined ? undefined : body.maxApiKeys,
         stripePriceId: body.stripePriceId === undefined ? undefined : body.stripePriceId,
         active: body.active,
         sortOrder: body.sortOrder,

@@ -24,16 +24,40 @@ interface Subscription {
   stripeManaged: boolean;
 }
 
+interface LicenseStatus {
+  entitlements: { planName: string | null; limits: { maxAdministrations: number | null; maxUsers: number | null; maxApiKeys: number | null } };
+  usage: { administrations: number; users: number; apiKeys: number };
+}
+
 const fmtPrice = (cents: number, currency: string, interval: string) => {
   const amount = (cents / 100).toLocaleString("nl-NL", { style: "currency", currency });
   return `${amount} / ${interval === "YEAR" ? "jaar" : "maand"}`;
 };
+
+function UsageRow({ label, used, limit }: { label: string; used: number; limit: number | null }) {
+  const pct = limit ? Math.min(100, Math.round((used / limit) * 100)) : 0;
+  const near = limit != null && used >= limit;
+  return (
+    <div>
+      <div className="flex justify-between text-sm">
+        <span className="text-slate-600">{label}</span>
+        <span className={`tabular-nums ${near ? "text-rose-600 font-medium" : "text-slate-700"}`}>{used}{limit != null ? ` / ${limit}` : " / ∞"}</span>
+      </div>
+      {limit != null && (
+        <div className="h-1.5 w-full rounded-full bg-slate-100 mt-1 overflow-hidden">
+          <div className={`h-full ${near ? "bg-rose-500" : pct >= 80 ? "bg-amber-500" : "bg-emerald-500"}`} style={{ width: `${pct}%` }} />
+        </div>
+      )}
+    </div>
+  );
+}
 
 export function BillingPage() {
   const { workspace } = useScope();
   const location = useLocation();
   const [plans, setPlans] = useState<PlanOption[]>([]);
   const [sub, setSub] = useState<Subscription | null>(null);
+  const [license, setLicense] = useState<LicenseStatus | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [busyPlan, setBusyPlan] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -42,6 +66,11 @@ export function BillingPage() {
   const loadSub = async () => {
     const r = await api<{ subscription: Subscription | null }>("/api/billing/subscription");
     setSub(r.subscription);
+    try {
+      setLicense(await api<LicenseStatus>("/api/billing/license"));
+    } catch {
+      /* license is best-effort */
+    }
   };
 
   const cancelSub = async () => {
@@ -175,6 +204,15 @@ export function BillingPage() {
                 {busy ? "Bezig…" : "Opzegging ongedaan maken"}
               </button>
             )}
+          </div>
+        )}
+
+        {license && (
+          <div className="mt-4 pt-4 border-t border-slate-100 space-y-2">
+            <div className="text-sm text-slate-500">Verbruik & limieten</div>
+            <UsageRow label="Administraties" used={license.usage.administrations} limit={license.entitlements.limits.maxAdministrations} />
+            <UsageRow label="Gebruikers" used={license.usage.users} limit={license.entitlements.limits.maxUsers} />
+            <UsageRow label="API-sleutels" used={license.usage.apiKeys} limit={license.entitlements.limits.maxApiKeys} />
           </div>
         )}
 

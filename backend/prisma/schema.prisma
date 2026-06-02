@@ -218,6 +218,11 @@ model Plan {
   currency      String          @default("EUR")
   interval      BillingInterval @default(MONTH)
   modules       String[]        @default([])
+  // Per-plan quantity limits (null = unlimited). The licensing layer enforces
+  // these when a workspace adds the resource; #34/Stripe will price the units.
+  maxAdministrations Int?
+  maxUsers           Int?
+  maxApiKeys         Int?
   stripePriceId String?
   active        Boolean         @default(true)
   sortOrder     Int             @default(0)

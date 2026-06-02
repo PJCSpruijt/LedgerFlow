@@ -1,6 +1,7 @@
 import { prisma } from "../config/prisma.js";
 import { Prisma, ScopeLevel, ScopedRole } from "@prisma/client";
 import { BadRequestError, ConflictError, ForbiddenError, NotFoundError } from "../utils/errors.js";
+import { assertWithinLimit } from "./plan.service.js";
 
 /**
  * Workspace-scoped team / role management. Lets a WORKSPACE/ACCOUNTANT/CLIENT
@@ -113,6 +114,8 @@ export async function addWorkspaceMember(input: {
   scopeLevel: ScopeLevel;
   scopeId: string;
   role: ScopedRole;
+  /** Enforce the plan's max-users limit (skipped for platform admins). */
+  enforceLimit?: boolean;
 }): Promise<{ membershipId: string }> {
   const email = input.email.trim().toLowerCase();
   if (!email) throw new BadRequestError("E-mailadres is verplicht");
@@ -121,6 +124,12 @@ export async function addWorkspaceMember(input: {
     throw new NotFoundError(
       "Geen gebruiker met dit e-mailadres gevonden. Laat de gebruiker eerst registreren of vraag de platformbeheerder de gebruiker aan te maken.",
     );
+  }
+  // A NEW user counts against the plan's user limit; adding a second role to an
+  // existing member does not.
+  if (input.enforceLimit) {
+    const already = await prisma.membership.findFirst({ where: { userId: user.id, ...inWorkspace(input.workspaceId) }, select: { id: true } });
+    if (!already) await assertWithinLimit(input.workspaceId, "users");
   }
   const fk = await assertScopeInWorkspace(input.workspaceId, input.scopeLevel, input.scopeId);
   try {

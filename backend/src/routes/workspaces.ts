@@ -13,6 +13,7 @@ import {
 import { asyncHandler } from "../middleware/asyncHandler.js";
 import { validateBody } from "../middleware/validate.js";
 import { ForbiddenError, NotFoundError } from "../utils/errors.js";
+import { assertWithinLimit } from "../services/plan.service.js";
 
 export const workspaceRouter = Router();
 
@@ -214,6 +215,7 @@ workspaceRouter.post(
     if (group.workspaceId !== req.scope!.workspaceId) {
       throw new ForbiddenError("Group does not belong to this workspace");
     }
+    if (!isPlatformAdmin(req)) await assertWithinLimit(req.scope!.workspaceId, "administrations");
     const entity = await prisma.entity.create({
       data: { name: req.body.name, groupId: group.id },
     });

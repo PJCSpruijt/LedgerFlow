@@ -9,6 +9,7 @@ import { asyncHandler } from "../middleware/asyncHandler.js";
 import { validateBody } from "../middleware/validate.js";
 import { requireAuth, requireScope, requireScopeRole } from "../middleware/auth.js";
 import { mapStripeStatus } from "../services/subscription.service.js";
+import { getLicenseStatus } from "../services/plan.service.js";
 import { moduleLabels } from "../config/modules.js";
 import { BadRequestError, NotFoundError } from "../utils/errors.js";
 
@@ -126,6 +127,16 @@ billingRouter.get(
           }
         : null,
     });
+  }),
+);
+
+/** Licensing status: entitlements (plan, modules, limits) + current usage. */
+billingRouter.get(
+  "/license",
+  requireAuth,
+  requireScope,
+  asyncHandler(async (req, res) => {
+    res.json(await getLicenseStatus(req.scope!.workspaceId));
   }),
 );
 
